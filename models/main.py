@@ -2,7 +2,8 @@ import os
 import gurobipy as gp
 import scipy as sp
 import pandas as pd
-from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices
+from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices, \
+    save_json, build_model_from_json
 
 if __name__ == "__main__":
 
@@ -14,8 +15,9 @@ if __name__ == "__main__":
                              "name": 'original_model.mps'},
               "print_model_sol": True,
               "save_original_model": True,
-              "sparce2dense": True,
-              "saveA": True
+              "sparce2dense": False,
+              "save_matrices": False,
+              "create_presolved": False
               }
 
     # Get the directory of the current script (main.py)
@@ -40,6 +42,7 @@ if __name__ == "__main__":
 
     # solving the original model
     original_model.optimize()
+    initial_sol = original_model.objVal
 
     # printing the original model solution
     if config['print_model_sol']:
@@ -53,17 +56,21 @@ if __name__ == "__main__":
         model_to_save = os.path.join(data_path, "original_model.mps")
         original_model.write(model_to_save)
 
-    # creating the presolved model
-    presolved_model = original_model.presolve()
-
     # Access constraint matrix A and right-hand side (RHS) vector b of the original model
     A, b, c, lb, ub = get_model_matrices(original_model)
 
     # Converting a sparse matrix to a dense matrix - for ease of manipulation
     if config['sparce2dense']:
-        A = pd.DataFrame(data=sp.sparce.csr_matrix.todense(A))
+        A = pd.DataFrame(data=sp.sparse.csr_matrix.todense(A))
+        #TODO df format
 
     # saving the matrix
-    if config['saveA']:
-        matrix_to_save = os.path.join(data_path, "A.csv")
-        A.to_csv(matrix_to_save, index=False)
+    if config['save_matrices']:
+        save_json(A, b, c, lb, ub, data_path)
+
+    # creating models from json files
+    created_model = build_model_from_json(data_path)
+
+    # creating the presolved model
+    if config['create_presolved']:
+        presolved_model = original_model.presolve()

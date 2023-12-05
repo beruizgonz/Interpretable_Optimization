@@ -1,3 +1,6 @@
+import os
+import json
+import pandas as pd
 import gurobipy as gp
 import random
 import numpy as np
@@ -71,3 +74,119 @@ def get_model_matrices(model):
     ub = np.array([var.UB for var in model.getVars()])
 
     return A, b, c, lb, ub
+
+
+def save_json(A, b, c, lb, ub, save_path):
+    """
+    Save matrices and data structures as JSON files.
+
+    Parameters:
+    - A (scipy.sparse.csr_matrix): Constraint matrix as a CSR matrix.
+    - b (list): Right-hand side (RHS) vector as a list.
+    - c (list): Objective function coefficients as a list.
+    - lb (ndarray): Lower bounds as a NumPy ndarray.
+    - ub (ndarray): Upper bounds as a NumPy ndarray.
+    - save_path (str): Path to save JSON files.
+
+    Example usage:
+    save_json(A, b, c, lb, ub, 'data_path')
+
+    Data types:
+    - A: scipy.sparse.csr_matrix
+    - b: list
+    - c: list
+    - lb: ndarray
+    - ub: ndarray
+    """
+
+    # Create a dictionary to store the data
+    data_dict = {
+        'A': A.toarray(),  # Convert csr_matrix to dense array for JSON
+        'b': b,
+        'c': c,
+        'lb': lb,
+        'ub': ub
+    }
+
+    # Ensure the save path exists
+    os.makedirs(save_path, exist_ok=True)
+
+    # Save each data item as a separate JSON file
+    for name, data in data_dict.items():
+        file_name = os.path.join(save_path, f'{name}.json')
+
+        if isinstance(data, list):
+            with open(file_name, 'w') as file:
+                json.dump(data, file)
+        elif isinstance(data, np.ndarray):
+            data_list = data.tolist()
+            with open(file_name, 'w') as file:
+                json.dump(data_list, file)
+        else:
+            raise ValueError(f"Unsupported data type for {name}")
+
+
+def build_model_from_json(data_path):
+    """
+    Build a Gurobi model from JSON files containing matrices and data.
+
+    Parameters:
+    - data_path (str): Path to the directory containing JSON files (A.json, b.json, c.json, lb.json, ub.json).
+
+    Returns:
+    - model (gurobipy.Model): Gurobi model constructed from the provided data.
+
+    Example usage:
+    model = build_model_from_json('data_path')
+    """
+
+    # Define the file names for JSON files
+    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json']
+
+    # Initialize data variables
+    A = None
+    b = None
+    c = None
+    lb = None
+    ub = None
+
+    # Load data from JSON files
+    for file_name in file_names:
+        file_path = os.path.join(data_path, file_name)
+        with open(file_path, 'r') as file:
+            data = json.load(file)
+
+            if file_name == 'A.json':
+                # Check if A is stored as a dense array
+                if isinstance(data, list):
+                    A = np.array(data)
+                else:
+                    # Assuming A is stored as a DataFrame (orient='split')
+                    A = pd.DataFrame(data=data['data'], columns=data['columns'], index=data['index'])
+            elif file_name == 'b.json':
+                b = data
+            elif file_name == 'c.json':
+                c = data
+            elif file_name == 'lb.json':
+                lb = data
+            elif file_name == 'ub.json':
+                ub = data
+
+    # Create a Gurobi model and add variables
+    num_variables = len(c)
+    model = gp.Model()
+    x = model.addMVar(shape=num_variables, lb=lb, ub=ub, name='x')
+
+    # Set the objective function
+    model.setObjective(c @ x, gp.GRB.MINIMIZE)
+
+    # Add constraints using matrix A and vector b
+    num_constraints = len(b)
+    for i in range(num_constraints):
+        model.addConstr(A[i, :] @ x, gp.GRB.LESS_EQUAL, b[i], name=f'constraint_{i}')
+
+    return model
+
+# Example usage:
+# Assuming you have JSON files (A.json, b.json, c.json, lb.json, ub.json) in 'data_path'
+model = build_model_from_json('data_path')
