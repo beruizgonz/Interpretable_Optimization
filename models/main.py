@@ -1,6 +1,5 @@
 import os
 import gurobipy as gp
-
 from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices
 
 if __name__ == "__main__":
