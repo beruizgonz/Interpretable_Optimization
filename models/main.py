@@ -1,38 +1,57 @@
-import gurobipy as gb
-import pandas as pd
-import scipy as sp
 import os
+import gurobipy as gp
 
-from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model
+from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices
 
-# Get the directory of the current script (main.py)
-current_script_dir = os.path.dirname(os.path.abspath(__file__))
+if __name__ == "__main__":
 
-# Navigate up one levels to get to the root of the project
-project_root = os.path.dirname(current_script_dir)
+    # parameters to run
+    config = {"create_model": {"val": False,
+                               "n_variables": 3,
+                               "n_constraints": 2},
+              "load_model": {"val": True,
+                             "name": 'original_model.mps'},
+              "print_model_sol": True,
+              "save_original_model": True
+              }
 
-# path and name to save
-data_path = os.path.join(project_root, 'data')
-model_filename = os.path.join(data_path, "original_model.mps")
+    # Get the directory of the current script (main.py)
+    current_script_dir = os.path.dirname(os.path.abspath(__file__))
 
-# creating the original_model
-n_variables = 3  # Number of decision variables
-n_constraints = 2  # Number of constraints
-original_model = create_original_model(n_variables, n_constraints)
-if original_model:
+    # Navigate up one levels to get to the root of the project
+    project_root = os.path.dirname(current_script_dir)
+
+    # path and name to save the original model and matrices
+    data_path = os.path.join(project_root, 'data')
+
+    # creating the original_model
+    if config['create_model']['val']:
+        original_model = create_original_model(config['create_model']['n_variables'],
+                                               config['create_model']['n_constraints'])
+    else:
+        # Specify the path to the MPS file you want to load
+        model_to_load = os.path.join(data_path, config['load_model']['name'])
+
+        # Load the model from the MPS file
+        original_model = gp.read(model_to_load)
+
+    # solving the original model
     original_model.optimize()
-    print("Original Model:")
-    print("Optimal Objective Value =", original_model.objVal)
-    for var in original_model.getVars():
-        print(f"{var.VarName} =", var.x)
 
-# saving the original model
-original_model.write(model_filename)
+    # printing the original model solution
+    if config['print_model_sol']:
+        print("Original Model:")
+        print("Optimal Objective Value =", original_model.objVal)
+        for var in original_model.getVars():
+            print(f"{var.VarName} =", var.x)
 
-# creating the presolved model
-presolved_model = original_model.presolve()
+    # saving the original model
+    if config["save_original_model"]:
+        model_to_save = os.path.join(data_path, "original_model.mps")
+        original_model.write(model_to_save)
 
-# Access constraint matrix A and right-hand side vector b of the original model
-A = original_model.getA()
-b = original_model.getAttr('RHS', original_model.getConstrs())
+    # creating the presolved model
+    presolved_model = original_model.presolve()
 
+    # Access constraint matrix A and right-hand side (RHS) vector b of the original model
+    A, b, c, lb, ub = get_model_matrices(original_model)
