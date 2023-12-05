@@ -11,6 +11,7 @@ current_script_dir = os.path.dirname(os.path.abspath(__file__))
 # Navigate up one levels to get to the root of the project
 project_root = os.path.dirname(current_script_dir)
 
+# path and name to save
 data_path = os.path.join(project_root, 'data')
 model_filename = os.path.join(data_path, "original_model.mps")
 
