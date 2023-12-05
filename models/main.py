@@ -1,5 +1,7 @@
 import os
 import gurobipy as gp
+import scipy as sp
+import pandas as pd
 from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices
 
 if __name__ == "__main__":
@@ -11,7 +13,9 @@ if __name__ == "__main__":
               "load_model": {"val": True,
                              "name": 'original_model.mps'},
               "print_model_sol": True,
-              "save_original_model": True
+              "save_original_model": True,
+              "sparce2dense": True,
+              "saveA": True
               }
 
     # Get the directory of the current script (main.py)
@@ -54,3 +58,12 @@ if __name__ == "__main__":
 
     # Access constraint matrix A and right-hand side (RHS) vector b of the original model
     A, b, c, lb, ub = get_model_matrices(original_model)
+
+    # Converting a sparse matrix to a dense matrix - for ease of manipulation
+    if config['sparce2dense']:
+        A = pd.DataFrame(data=sp.sparce.csr_matrix.todense(A))
+
+    # saving the matrix
+    if config['saveA']:
+        matrix_to_save = os.path.join(data_path, "A.csv")
+        A.to_csv(matrix_to_save, index=False)
