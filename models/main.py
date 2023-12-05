@@ -15,8 +15,7 @@ if __name__ == "__main__":
                              "name": 'original_model.mps'},
               "print_model_sol": True,
               "save_original_model": True,
-              "sparce2dense": False,
-              "save_matrices": False,
+              "save_matrices": True,
               "create_presolved": False
               }
 
@@ -59,17 +58,16 @@ if __name__ == "__main__":
     # Access constraint matrix A and right-hand side (RHS) vector b of the original model
     A, b, c, lb, ub = get_model_matrices(original_model)
 
-    # Converting a sparse matrix to a dense matrix - for ease of manipulation
-    if config['sparce2dense']:
-        A = pd.DataFrame(data=sp.sparse.csr_matrix.todense(A))
-        #TODO df format
-
     # saving the matrix
     if config['save_matrices']:
         save_json(A, b, c, lb, ub, data_path)
 
     # creating models from json files
     created_model = build_model_from_json(data_path)
+
+    # solving created model
+    created_model.optimize()
+    final_sol = created_model.objVal
 
     # creating the presolved model
     if config['create_presolved']:

@@ -1,9 +1,10 @@
 import os
 import json
-import pandas as pd
+import scipy.sparse as sp
 import gurobipy as gp
 import random
 import numpy as np
+from gurobipy import LinExpr
 
 
 def create_original_model(n_variables, n_constraints):
@@ -136,6 +137,10 @@ def build_model_from_json(data_path):
     Returns:
     - model (gurobipy.Model): Gurobi model constructed from the provided data.
 
+    This function assumes that matrix A is in scipy.sparse.csr_matrix format, and vectors b, c, lb, and ub
+    are in list or numpy.ndarray format. It creates a new Gurobi model, adds variables with bounds (lb and ub),
+    sets the objective function using vector c, and adds constraints based on matrix A and vector b.
+
     Example usage:
     model = build_model_from_json('data_path')
     """
@@ -157,36 +162,41 @@ def build_model_from_json(data_path):
             data = json.load(file)
 
             if file_name == 'A.json':
-                # Check if A is stored as a dense array
-                if isinstance(data, list):
-                    A = np.array(data)
-                else:
-                    # Assuming A is stored as a DataFrame (orient='split')
-                    A = pd.DataFrame(data=data['data'], columns=data['columns'], index=data['index'])
+                # Convert the loaded dense matrix back to a csr_matrix
+                dense_matrix = np.array(data)
+                A = sp.csr_matrix(dense_matrix)
             elif file_name == 'b.json':
-                b = data
+                b = np.array(data)
             elif file_name == 'c.json':
-                c = data
+                c = np.array(data)
             elif file_name == 'lb.json':
-                lb = data
+                lb = np.array(data)
             elif file_name == 'ub.json':
-                ub = data
+                ub = np.array(data)
+
+    # Ensure A is a scipy.sparse.csr_matrix
+    if not isinstance(A, sp.csr_matrix):
+        raise ValueError("Matrix A is not in csr_matrix format")
 
     # Create a Gurobi model and add variables
     num_variables = len(c)
     model = gp.Model()
     x = model.addMVar(shape=num_variables, lb=lb, ub=ub, name='x')
+    model.update()
+    # Create the objective expression using quicksum
+    objective_expr = gp.quicksum(c[i] * x[i] for i in range(num_variables))
 
-    # Set the objective function
-    model.setObjective(c @ x, gp.GRB.MINIMIZE)
+    # Set the objective function to minimize
+    model.setObjective(objective_expr, gp.GRB.MINIMIZE)
 
     # Add constraints using matrix A and vector b
-    num_constraints = len(b)
-    for i in range(num_constraints):
-        model.addConstr(A[i, :] @ x, gp.GRB.LESS_EQUAL, b[i], name=f'constraint_{i}')
+    for i in range(A.shape[0]):
+        start = A.indptr[i]
+        end = A.indptr[i + 1]
+        variables = A.indices[start:end]
+        coefficients = A.data[start:end]
 
+        constraint_expr: LinExpr = gp.quicksum(coefficients[j] * x[variables[j]] for j in range(len(variables)))
+        model.addConstr(constraint_expr <= b[i], name=f'constraint_{i}')
+        model.update()
     return model
-
-# Example usage:
-# Assuming you have JSON files (A.json, b.json, c.json, lb.json, ub.json) in 'data_path'
-model = build_model_from_json('data_path')
