@@ -14,7 +14,7 @@ if __name__ == "__main__":
     # parameters to run
     config = {"create_model": {"val": True,
                                "n_variables": 10,
-                               "n_constraints": 5},
+                               "n_constraints": 2},
               "load_model": {"val": False,
                              "name": 'original_model.mps'},
               "print_detail_sol": True,
@@ -93,14 +93,16 @@ if __name__ == "__main__":
     if config['print_detail_sol']:
         print("============ Original Model ============")
         print("Optimal Objective Value =", original_model.objVal)
+        print("Basic Decision variables: ")
         for var in original_model.getVars():
-            if var.x != 0: # print only basic decision variables
+            if var.x != 0:
                 print(f"{var.VarName} =", var.x)
 
         print("============ Created Model ============")
         print("Optimal Objective Value =", created_model.objVal)
+        print("Basic Decision variables: ")
         for var in created_model.getVars():
-            if var.x != 0:  # print only basic decision variables
+            if var.x != 0:
                 print(f"{var.VarName} =", var.x)
 
     # creating the presolved model
