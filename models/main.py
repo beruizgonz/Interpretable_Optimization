@@ -3,7 +3,8 @@ import gurobipy as gp
 import logging
 from datetime import datetime
 from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices, \
-    save_json, build_model_from_json
+    save_json, build_model_from_json, compare_models
+
 logging.basicConfig()
 log = logging.getLogger(__name__)
 log.setLevel('INFO')
@@ -13,10 +14,10 @@ if __name__ == "__main__":
     # parameters to run
     config = {"create_model": {"val": True,
                                "n_variables": 10,
-                               "n_constraints": 25},
+                               "n_constraints": 5},
               "load_model": {"val": False,
                              "name": 'original_model.mps'},
-              "print_model_sol": True,
+              "print_detail_sol": True,
               "save_original_model": True,
               "save_matrices": True,
               "create_presolved": False
@@ -33,7 +34,7 @@ if __name__ == "__main__":
 
     # creating the original_model
     log.info(
-        f"{str(datetime.now())}: Creating the original_model with {config['create_model']['n_variables']} variables"
+        f"{str(datetime.now())}: Creating the original_model with {config['create_model']['n_variables']} variables "
         f"and {config['create_model']['n_constraints']} constraints...")
 
     if config['create_model']['val']:
@@ -84,17 +85,23 @@ if __name__ == "__main__":
     created_model.optimize()
     final_sol = created_model.objVal
 
-    # printing the original model solution
-    if config['print_model_sol']:
+    obj_var, dec_var = compare_models(original_model, created_model)
+    print(f"The absolute deviation of objective function value is {obj_var} "
+          f"and the average deviation of decision variable values is {dec_var}.")
+
+    # printing detailed information about the models
+    if config['print_detail_sol']:
         print("============ Original Model ============")
         print("Optimal Objective Value =", original_model.objVal)
         for var in original_model.getVars():
-            print(f"{var.VarName} =", var.x)
+            if var.x != 0: # print only basic decision variables
+                print(f"{var.VarName} =", var.x)
 
         print("============ Created Model ============")
-        print("Optimal Objective Value =", original_model.objVal)
-        for var in original_model.getVars():
-            print(f"{var.VarName} =", var.x)
+        print("Optimal Objective Value =", created_model.objVal)
+        for var in created_model.getVars():
+            if var.x != 0:  # print only basic decision variables
+                print(f"{var.VarName} =", var.x)
 
     # creating the presolved model
     if config['create_presolved']:

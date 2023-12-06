@@ -200,3 +200,33 @@ def build_model_from_json(data_path):
         model.addConstr(constraint_expr <= b[i], name=f'constraint_{i}')
         model.update()
     return model
+
+
+def compare_models(model1, model2):
+    """
+    Compare two Gurobi models based on their objective values and decision variables.
+
+    Parameters:
+    model1, model2: Two Gurobi models to compare.
+
+    Returns:
+    - obj_deviation: Deviation between the objective values of the two models.
+    - avg_var_deviation: Average variation between the decision variables of the models.
+                          Returns NaN if the number of decision variables is not the same.
+    """
+
+    # 1. Calculate the deviation between the objective function values
+    obj_deviation = abs(model1.objVal - model2.objVal)
+
+    # 2. Check if they have the same number of decision variables
+    vars1 = model1.getVars()
+    vars2 = model2.getVars()
+
+    if len(vars1) != len(vars2):
+        avg_var_deviation = np.nan
+    else:
+        # Calculate the average variation between the decision variables values
+        var_diffs = [abs(vars1[i].x - vars2[i].x) for i in range(len(vars1))]
+        avg_var_deviation = sum(var_diffs) / len(vars1)
+
+    return obj_deviation, avg_var_deviation
