@@ -33,8 +33,10 @@ def create_original_model(n_variables, n_constraints):
         model.setObjective(gp.quicksum(c[i] * variables[i] for i in range(n_variables)), sense=gp.GRB.MINIMIZE)
 
         # Add random constraints
-        A = np.random.rand(n_constraints, n_variables)
-        b = np.random.rand(n_constraints)
+        # A = np.random.rand(n_constraints, n_variables)
+        A = np.random.randint(1, 101, size=(n_constraints, n_variables))
+        # b = np.random.rand(n_constraints)
+        b = np.random.randint(1, 101, size=(n_constraints))
         for i in range(n_constraints):
             model.addConstr(gp.quicksum(A[i, j] * variables[j] for j in range(n_variables)) <= b[i],
                             name=f'Constraint_{i}')
@@ -230,3 +232,134 @@ def compare_models(model1, model2):
         avg_var_deviation = sum(var_diffs) / len(vars1)
 
     return obj_deviation, avg_var_deviation
+
+
+def normalize_features(A):
+    """
+    Normalize a CSR matrix by rows, but only for rows where the maximum value is not zero.
+
+    Parameters:
+    A (scipy.sparse.csr_matrix): The matrix to be normalized.
+
+    Returns:
+    norm_A (scipy.sparse.csr_matrix): The normalized matrix.
+    scalers (numpy.array): Scale factors used for normalization (maximum value of each row, 1 for rows with max value of 0).
+    """
+
+    # Initialize an array to store the scale factors
+    scalers = np.ones(A.shape[0])  # Default to 1 for rows where max value is zero
+
+    # Create a copy of A to avoid modifying the original matrix
+    norm_A = A.copy()
+
+    # Normalize each row
+    for i in range(A.shape[0]):
+        row = A.getrow(i)
+        max_value = row.max()
+
+        if max_value != 0:
+            norm_A[i] = row / max_value
+            scalers[i] = max_value
+
+    return norm_A, scalers
+
+
+def reduction_features(threshold, A_norm, A):
+    """
+    Reduce features of a matrix A based on a threshold applied to its normalized form A_norm.
+
+    Parameters:
+    threshold (float): The threshold value to apply.
+    A_norm (scipy.sparse.csr_matrix): The normalized matrix.
+    A (scipy.sparse.csr_matrix): The original matrix.
+
+    Returns:
+    red_A (scipy.sparse.csr_matrix): The reduced matrix.
+    """
+    # Ensure A is in csr format for efficient row-wise operations
+    A = A.tocsr()
+    A_norm = A_norm.tocsr()
+
+    # Create a copy of A to form red_A
+    red_A = A.copy()
+
+    # Iterate over each element in A_norm and set corresponding element in red_A to 0 if it's below the threshold
+    for i in range(A_norm.shape[0]):
+        for j in range(A_norm.shape[1]):
+            if A_norm[i, j] < threshold:
+                red_A[i, j] = 0
+
+    return red_A
+
+
+def sensitivity_analysis(data_path, original_model, params):
+    """
+    Perform a sensitivity analysis on a Gurobi model by varying a threshold that affects certain matrix elements.
+
+    This function first solves the original model and then iterates over a range of threshold values. For each threshold:
+    1. It normalizes the matrix A from the original model.
+    2. Reduces A by setting elements below the threshold to zero.
+    3. Saves the reduced matrix and other model parameters.
+    4. Rebuilds and solves a new model from these parameters.
+    5. Records the threshold value, objective function value, and decision variables.
+
+    Parameters:
+    data_path (str): Path to save and load data for the model.
+    original_model (gurobipy.Model): The original Gurobi model.
+    params (dict): Dictionary with 'max_threshold', 'init_threshold', 'step_threshold' values for the analysis.
+
+    Returns:
+    tuple of lists: (eps, of, dv) where
+      - eps is a list of threshold values used,
+      - of is a list of objective function values for each threshold,
+      - dv is a list of decision variable values for each threshold.
+    """
+
+    A, b, c, lb, ub = get_model_matrices(original_model)
+
+    # Calculate normalized A
+    A_norm, _ = normalize_features(A)
+
+    # Initialize lists to store results
+    eps = [0]  # Start with 0 threshold
+    of = [original_model.objVal]  # Start with the objective value of the original model
+    dv = [np.array([var.x for var in original_model.getVars()])]  # Start with decision variables of original model
+
+    # Iterate over threshold values
+    threshold = params['init_threshold']
+    while threshold <= params['max_threshold']:
+        # Calculate reduced A
+        A_red = reduction_features(threshold, A_norm, A)
+
+        # Save the matrices
+        save_json(A_red, b, c, lb, ub, data_path)
+
+        # Create a new model from the saved matrices
+        iterative_model = build_model_from_json(data_path)
+
+        # Solve the new model
+        iterative_model.setParam('OutputFlag', 0)  # Optionally suppress Gurobi output
+        iterative_model.optimize()
+
+        # Update lists with results
+        # Check if the model found a solution
+        if iterative_model.status == gp.GRB.OPTIMAL:
+            # Model found a solution
+            eps.append(threshold)
+            of.append(iterative_model.objVal)
+            dv.append(np.array([var.x for var in iterative_model.getVars()]))
+            print(f"Threshold {threshold} has an objective function of {iterative_model.objVal}")
+        else:
+            # Model did not find a solution
+            eps.append(threshold)
+            of.append(np.nan)  # Append NaN for objective function
+            dv.append(np.full(len(original_model.getVars()), np.nan))
+            print(f"Threshold {threshold} has no feasible solution")
+
+        # Delete the model to free up resources
+        del iterative_model
+
+        # Increment threshold
+        threshold += params['step_threshold']
+
+    return eps, of, dv

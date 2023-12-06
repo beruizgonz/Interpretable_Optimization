@@ -3,7 +3,7 @@ import gurobipy as gp
 import logging
 from datetime import datetime
 from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices, \
-    save_json, build_model_from_json, compare_models
+    save_json, build_model_from_json, compare_models, normalize_features, reduction_features, sensitivity_analysis
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -17,10 +17,18 @@ if __name__ == "__main__":
                                "n_constraints": 2},
               "load_model": {"val": False,
                              "name": 'original_model.mps'},
+              "verbose": 1,
               "print_detail_sol": True,
               "save_original_model": True,
               "save_matrices": True,
-              "create_presolved": False
+              "normalize_A": True,
+              "Reduction_A": {"val": True,
+                              "threshold": 0.1},
+              "create_presolved": False,
+              "sensitivity_analysis": {"val": True,
+                                       "max_threshold": 0.5,
+                                       "init_threshold": 0.01,
+                                       "step_threshold": 0.001}
               }
 
     # Get the directory of the current script (main.py)
@@ -52,6 +60,7 @@ if __name__ == "__main__":
     # solving the original model
     log.info(
         f"{str(datetime.now())}: Solving the original_model...")
+    original_model.setParam('OutputFlag', config['verbose'])
     original_model.optimize()
     initial_sol = original_model.objVal
 
@@ -82,6 +91,7 @@ if __name__ == "__main__":
     # solving created model
     log.info(
         f"{str(datetime.now())}: Solving the created_model...")
+    created_model.setParam('OutputFlag', config['verbose'])
     created_model.optimize()
     final_sol = created_model.objVal
 
@@ -105,13 +115,26 @@ if __name__ == "__main__":
             if var.x != 0:
                 print(f"{var.VarName} =", var.x)
 
+    # Normalization
+    if config['normalize_A']:
+        A_norm, A_scaler = normalize_features(A)
+    else:
+        A_norm = A.copy()
+
+    # Reduction
+    if config['Reduction_A']['val']:
+        A_red = reduction_features(config['Reduction_A']['threshold'], A_norm, A)
+
     # creating the presolved model
     if config['create_presolved']:
         presolved_model = original_model.presolve()
 
+    # Sensitivity analysis
+    if config['sensitivity_analysis']['val']:
+        eps, of, dv = sensitivity_analysis(data_path, original_model, config['sensitivity_analysis'])
 
-
-
+    print("hey")
+    #TODO plot objective value x threshold and basic variables
 
 
 
