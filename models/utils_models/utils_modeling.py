@@ -5,7 +5,8 @@ import gurobipy as gp
 import random
 import numpy as np
 from gurobipy import LinExpr
-
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 def create_original_model(n_variables, n_constraints):
     """
@@ -363,3 +364,34 @@ def sensitivity_analysis(data_path, original_model, params):
         threshold += params['step_threshold']
 
     return eps, of, dv
+
+
+def visual_sensitivity_analysis(eps, of, dv):
+    # Filter non-NaN values and corresponding eps and dv
+    filtered_eps = [eps[i] for i in range(len(of)) if not np.isnan(of[i])]
+    filtered_of = [of[i] for i in range(len(of)) if not np.isnan(of[i])]
+    filtered_dv = [dv[i] for i in range(len(of)) if not np.isnan(of[i])]
+
+    # Plot for objective function
+    fig_of = go.Figure()
+    fig_of.add_trace(go.Scatter(x=filtered_eps, y=filtered_of, mode='lines+markers', name='Objective Function'))
+    fig_of.update_layout(title='Objective Function Sensitivity Analysis', xaxis_title='Threshold', yaxis_title='Objective Function Value')
+    fig_of.show()
+
+    # Determine number of basic decision variables (non-zero)
+    num_variables = len(dv[0])
+    num_basic_variables = sum([1 for var in dv[0] if var != 0])
+
+    # Create subplots for decision variables
+    fig_dv = make_subplots(rows=num_basic_variables, cols=1, subplot_titles=[f'Decision Variable {i+1}' for i in range(num_basic_variables)])
+    row = 1
+    for i in range(num_variables):
+        if dv[0][i] != 0:  # Check if the variable is basic (non-zero in the first set of decision variables)
+            values = [filtered_dv[j][i] for j in range(len(filtered_dv))]
+            fig_dv.add_trace(go.Scatter(x=filtered_eps, y=values, mode='lines+markers', name=f'Variable {i+1}'), row=row, col=1)
+            row += 1
+
+    fig_dv.update_layout(height=300*num_basic_variables, title='Decision Variables Sensitivity Analysis', showlegend=False)
+    fig_dv.update_xaxes(title_text='Threshold')
+    fig_dv.update_yaxes(title_text='Value')
+    fig_dv.show()

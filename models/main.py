@@ -3,7 +3,8 @@ import gurobipy as gp
 import logging
 from datetime import datetime
 from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices, \
-    save_json, build_model_from_json, compare_models, normalize_features, reduction_features, sensitivity_analysis
+    save_json, build_model_from_json, compare_models, normalize_features, reduction_features, sensitivity_analysis, \
+    visual_sensitivity_analysis
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -12,21 +13,21 @@ log.setLevel('INFO')
 if __name__ == "__main__":
 
     # parameters to run
-    config = {"create_model": {"val": True,
-                               "n_variables": 10,
-                               "n_constraints": 2},
-              "load_model": {"val": False,
+    config = {"create_model": {"val": False,
+                               "n_variables": 50,
+                               "n_constraints": 25},
+              "load_model": {"val": True,
                              "name": 'original_model.mps'},
-              "verbose": 1,
+              "verbose": 0,
               "print_detail_sol": True,
-              "save_original_model": True,
+              "save_original_model": False,
               "save_matrices": True,
               "normalize_A": True,
               "Reduction_A": {"val": True,
                               "threshold": 0.1},
               "create_presolved": False,
               "sensitivity_analysis": {"val": True,
-                                       "max_threshold": 0.5,
+                                       "max_threshold": 0.3,
                                        "init_threshold": 0.01,
                                        "step_threshold": 0.001}
               }
@@ -133,8 +134,7 @@ if __name__ == "__main__":
     if config['sensitivity_analysis']['val']:
         eps, of, dv = sensitivity_analysis(data_path, original_model, config['sensitivity_analysis'])
 
-    print("hey")
-    #TODO plot objective value x threshold and basic variables
+    visual_sensitivity_analysis(eps, of, dv)
 
 
 

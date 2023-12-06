@@ -4,3 +4,4 @@ pyomo==6.7.0
 matplotlib==3.8.2
 gurobipy==11.0.0
 scipy==1.11.4
+plotly==5.18.0
