@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices, \
     save_json, build_model_from_json, compare_models, normalize_features, reduction_features, sensitivity_analysis, \
-    visual_sensitivity_analysis
+    visual_sensitivity_analysis, create_dual_model, build_dual_model_from_json
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -12,11 +12,11 @@ log.setLevel('INFO')
 
 if __name__ == "__main__":
 
-    # parameters to run
-    config = {"create_model": {"val": False,
-                               "n_variables": 50,
-                               "n_constraints": 25},
-              "load_model": {"val": True,
+    # ====================================== Defining initial configuration ============================================
+    config = {"create_model": {"val": True,
+                               "n_variables": 5,
+                               "n_constraints": 3},
+              "load_model": {"val": False,
                              "name": 'original_model.mps'},
               "verbose": 0,
               "print_detail_sol": True,
@@ -29,9 +29,11 @@ if __name__ == "__main__":
               "sensitivity_analysis": {"val": True,
                                        "max_threshold": 0.3,
                                        "init_threshold": 0.01,
-                                       "step_threshold": 0.001}
+                                       "step_threshold": 0.001},
+              "create_dual": True
               }
 
+    # ================================================== Directories to work ===========================================
     # Get the directory of the current script (main.py)
     current_script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -41,14 +43,14 @@ if __name__ == "__main__":
     # path and name to save the original model and matrices
     data_path = os.path.join(project_root, 'data')
 
-    # creating the original_model
+    # ================================= Creating or loading the original_primal model ==================================
     log.info(
-        f"{str(datetime.now())}: Creating the original_model with {config['create_model']['n_variables']} variables "
+        f"{str(datetime.now())}: Creating the original_primal with {config['create_model']['n_variables']} variables "
         f"and {config['create_model']['n_constraints']} constraints...")
 
     if config['create_model']['val']:
-        original_model = create_original_model(config['create_model']['n_variables'],
-                                               config['create_model']['n_constraints'])
+        original_primal = create_original_model(config['create_model']['n_variables'],
+                                                config['create_model']['n_constraints'])
     else:
         log.info(
             f"{str(datetime.now())}: Loading the original_model...")
@@ -56,63 +58,83 @@ if __name__ == "__main__":
         model_to_load = os.path.join(data_path, config['load_model']['name'])
 
         # Load the model from the MPS file
-        original_model = gp.read(model_to_load)
+        original_primal = gp.read(model_to_load)
 
-    # solving the original model
-    log.info(
-        f"{str(datetime.now())}: Solving the original_model...")
-    original_model.setParam('OutputFlag', config['verbose'])
-    original_model.optimize()
-    initial_sol = original_model.objVal
-
-    # saving the original model
+    # ======================================= saving the original_primal model in the path =============================
     if config["save_original_model"]:
         log.info(
-            f"{str(datetime.now())}: Saving the original_model...")
-        model_to_save = os.path.join(data_path, "original_model.mps")
-        original_model.write(model_to_save)
+            f"{str(datetime.now())}: Saving the original_primal...")
+        model_to_save = os.path.join(data_path, "original_primal.mps")
+        original_primal.write(model_to_save)
 
-    # Access constraint matrix A and right-hand side (RHS) vector b of the original model
+    # ========================== Getting matrices A, b, c and the bound of the original model ==========================
     log.info(
         f"{str(datetime.now())}: Accessing matrix A, right-hand side b, cost function c, and the bounds of "
         f"the original model...")
-    A, b, c, lb, ub = get_model_matrices(original_model)
+    A, b, c, lb, ub = get_model_matrices(original_primal)
 
-    # saving the matrix
+    # ====================================== Saving matrices as json in the path =======================================
     if config['save_matrices']:
         log.info(
             f"{str(datetime.now())}: Saving A, b, c, lb and ub...")
         save_json(A, b, c, lb, ub, data_path)
 
-    # creating models from json files
+    # ============================= Creating the primal and the dual models from json files ============================
     log.info(
-        f"{str(datetime.now())}: Creating model from  A, b, c, lb and ub...")
-    created_model = build_model_from_json(data_path)
+        f"{str(datetime.now())}: Creating primal model by loading A, b, c, lb and ub...")
+    created_primal = build_model_from_json(data_path)
 
-    # solving created model
     log.info(
-        f"{str(datetime.now())}: Solving the created_model...")
-    created_model.setParam('OutputFlag', config['verbose'])
-    created_model.optimize()
-    final_sol = created_model.objVal
+        f"{str(datetime.now())}: Creating dual model by loading A, b, c, lb and ub...")
+    # created_dual = create_dual_model(data_path)
+    created_dual = build_dual_model_from_json(data_path)
+    A_dual, b_dual, c_dual, lb_dual, ub_dual = get_model_matrices(created_dual)
 
-    obj_var, dec_var = compare_models(original_model, created_model)
+    # ====================== solving all models: original_primal, created_primal and created_dual ======================
+    log.info(
+        f"{str(datetime.now())}: Solving the original_primal model...")
+    original_primal.setParam('OutputFlag', config['verbose'])
+    original_primal.optimize()
+    original_primal_sol = original_primal.objVal
+
+    log.info(
+        f"{str(datetime.now())}: Solving the created_primal model...")
+    created_primal.setParam('OutputFlag', config['verbose'])
+    created_primal.optimize()
+    created_primal_sol = created_primal.objVal
+
+    log.info(
+        f"{str(datetime.now())}: Solving the created_dual model...")
+    created_dual.setParam('OutputFlag', config['verbose'])
+    created_dual.optimize()
+    created_dual_sol = created_dual.objVal
+
+    print("Status:", created_dual.status)
+
+    if created_dual.status == gp.GRB.INFEASIBLE:
+        created_dual.computeIIS()
+        created_dual.write("model.ilp")
+        print("Infeasible constraints written to 'model.ilp'")
+
+    dual_created_sol = created_dual.objVal
+
+    obj_var, dec_var = compare_models(original_primal, created_primal)
     print(f"The absolute deviation of objective function value is {obj_var} "
           f"and the average deviation of decision variable values is {dec_var}.")
 
     # printing detailed information about the models
     if config['print_detail_sol']:
         print("============ Original Model ============")
-        print("Optimal Objective Value =", original_model.objVal)
+        print("Optimal Objective Value =", original_primal.objVal)
         print("Basic Decision variables: ")
-        for var in original_model.getVars():
+        for var in original_primal.getVars():
             if var.x != 0:
                 print(f"{var.VarName} =", var.x)
 
         print("============ Created Model ============")
-        print("Optimal Objective Value =", created_model.objVal)
+        print("Optimal Objective Value =", created_primal.objVal)
         print("Basic Decision variables: ")
-        for var in created_model.getVars():
+        for var in created_primal.getVars():
             if var.x != 0:
                 print(f"{var.VarName} =", var.x)
 
@@ -128,11 +150,11 @@ if __name__ == "__main__":
 
     # creating the presolved model
     if config['create_presolved']:
-        presolved_model = original_model.presolve()
+        presolved_model = original_primal.presolve()
 
     # Sensitivity analysis
     if config['sensitivity_analysis']['val']:
-        eps, of, dv, ind = sensitivity_analysis(data_path, original_model, config['sensitivity_analysis'])
+        eps, of, dv, ind = sensitivity_analysis(data_path, original_primal, config['sensitivity_analysis'])
 
     visual_sensitivity_analysis(eps, of, dv)
 

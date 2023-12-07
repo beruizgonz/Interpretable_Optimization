@@ -469,3 +469,85 @@ def create_dual_model(data_path):
 
     dual_model.update()
     return dual_model
+
+
+def build_dual_model_from_json(data_path):
+    """
+    Build the dual of a Gurobi model from JSON files containing matrices and data, specifically for a linear
+    programming problem of the form:
+    Minimize Z = C^T X
+    subject to: A X <= b, X >= 0
+
+    The dual problem is formulated as:
+    Maximize W = b^T y
+    subject to: A^T y <= C, y >= 0
+
+    Parameters:
+    - data_path (str): Path to the directory containing JSON files (A.json, b.json, c.json, lb.json, ub.json).
+
+    Returns:
+    - dual_model (gurobipy.Model): The dual Gurobi model constructed from the provided data.
+
+    This function assumes that matrix A is in scipy.sparse.csr_matrix format, and vectors b, c, lb, and ub
+    are in list or numpy.ndarray format. It creates a new Gurobi model for the dual, adds variables,
+    sets the dual objective function using vector b, and adds constraints based on matrix A^T and vector c.
+
+    Example usage:
+    dual_model = build_dual_model_from_json('data_path')
+    """
+
+    # Define the file names for JSON files
+    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json']
+
+    # Initialize data variables
+    A = None
+    b = None
+    c = None
+    lb = None
+    ub = None
+
+    # Load data from JSON files
+    for file_name in file_names:
+        file_path = os.path.join(data_path, file_name)
+        with open(file_path, 'r') as file:
+            data = json.load(file)
+
+            if file_name == 'A.json':
+                # Convert the loaded dense matrix back to a csr_matrix
+                dense_matrix = np.array(data)
+                dense_matrix_transpose = dense_matrix.transpose()
+                A = sp.csr_matrix(dense_matrix_transpose)
+            elif file_name == 'b.json':
+                c = np.array(data)
+            elif file_name == 'c.json':
+                b = np.array(data)
+
+    # Ensure A is a scipy.sparse.csr_matrix
+    if not isinstance(A, sp.csr_matrix):
+        raise ValueError("Matrix A is not in csr_matrix format")
+
+    # Create a Gurobi model and add variables
+    num_variables = len(c)
+    lb = np.full(num_variables, 0)
+    ub = np.full(num_variables, np.inf)
+
+    model = gp.Model()
+    y = model.addMVar(shape=num_variables, lb=lb, ub=ub, name='y')
+    model.update()
+    # Create the objective expression using quicksum
+    objective_expr = gp.quicksum(c[i] * y[i] for i in range(num_variables))
+
+    # Set the objective function to maximize
+    model.setObjective(objective_expr, gp.GRB.MAXIMIZE)
+
+    # Add constraints using matrix A and vector c
+    for i in range(A.shape[0]):
+        start = A.indptr[i]
+        end = A.indptr[i + 1]
+        variables = A.indices[start:end]
+        coefficients = A.data[start:end]
+
+        constraint_expr: LinExpr = gp.quicksum(coefficients[j] * y[variables[j]] for j in range(len(variables)))
+        model.addConstr(constraint_expr >= b[i], name=f'constraint_{i}')
+        model.update()
+    return model
