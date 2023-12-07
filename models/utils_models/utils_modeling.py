@@ -8,6 +8,7 @@ from gurobipy import LinExpr
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 
+
 def create_original_model(n_variables, n_constraints):
     """
     Create a random linear programming (LP) model with the specified number of decision variables and constraints.
@@ -34,9 +35,7 @@ def create_original_model(n_variables, n_constraints):
         model.setObjective(gp.quicksum(c[i] * variables[i] for i in range(n_variables)), sense=gp.GRB.MINIMIZE)
 
         # Add random constraints
-        # A = np.random.rand(n_constraints, n_variables)
         A = np.random.randint(1, 101, size=(n_constraints, n_variables))
-        # b = np.random.rand(n_constraints)
         b = np.random.randint(1, 101, size=(n_constraints))
         for i in range(n_constraints):
             model.addConstr(gp.quicksum(A[i, j] * variables[j] for j in range(n_variables)) <= b[i],
@@ -325,12 +324,21 @@ def sensitivity_analysis(data_path, original_model, params):
     eps = [0]  # Start with 0 threshold
     of = [original_model.objVal]  # Start with the objective value of the original model
     dv = [np.array([var.x for var in original_model.getVars()])]  # Start with decision variables of original model
+    changed_indices = [None]  # List to store indices changed at each threshold
 
     # Iterate over threshold values
     threshold = params['init_threshold']
     while threshold <= params['max_threshold']:
         # Calculate reduced A
         A_red = reduction_features(threshold, A_norm, A)
+
+        # Convert A and A_red to dense format for comparison
+        A_dense = A.toarray()
+        A_red_dense = A_red.toarray()
+
+        # Record indices where A has been changed
+        indices = [(i, j) for i in range(A.shape[0]) for j in range(A.shape[1]) if
+                   A_dense[i, j] != 0 and A_red_dense[i, j] == 0]
 
         # Save the matrices
         save_json(A_red, b, c, lb, ub, data_path)
@@ -348,12 +356,16 @@ def sensitivity_analysis(data_path, original_model, params):
             # Model found a solution
             eps.append(threshold)
             of.append(iterative_model.objVal)
+            changed_indices.append(indices)
             dv.append(np.array([var.x for var in iterative_model.getVars()]))
-            print(f"Threshold {threshold} has an objective function of {iterative_model.objVal}")
+            print(
+                f"Threshold {np.round(threshold,4)} has changed {len(indices)} items, "
+                f"final objective function is: {np.round(iterative_model.objVal,6)}")
         else:
             # Model did not find a solution
             eps.append(threshold)
             of.append(np.nan)  # Append NaN for objective function
+            changed_indices.append(np.nan)
             dv.append(np.full(len(original_model.getVars()), np.nan))
             print(f"Threshold {threshold} has no feasible solution")
 
@@ -363,7 +375,7 @@ def sensitivity_analysis(data_path, original_model, params):
         # Increment threshold
         threshold += params['step_threshold']
 
-    return eps, of, dv
+    return eps, of, dv, changed_indices
 
 
 def visual_sensitivity_analysis(eps, of, dv):
@@ -375,7 +387,8 @@ def visual_sensitivity_analysis(eps, of, dv):
     # Plot for objective function
     fig_of = go.Figure()
     fig_of.add_trace(go.Scatter(x=filtered_eps, y=filtered_of, mode='lines+markers', name='Objective Function'))
-    fig_of.update_layout(title='Objective Function Sensitivity Analysis', xaxis_title='Threshold', yaxis_title='Objective Function Value')
+    fig_of.update_layout(title='Objective Function Sensitivity Analysis', xaxis_title='Threshold',
+                         yaxis_title='Objective Function Value')
     fig_of.show()
 
     # Determine number of basic decision variables (non-zero)
@@ -383,15 +396,76 @@ def visual_sensitivity_analysis(eps, of, dv):
     num_basic_variables = sum([1 for var in dv[0] if var != 0])
 
     # Create subplots for decision variables
-    fig_dv = make_subplots(rows=num_basic_variables, cols=1, subplot_titles=[f'Decision Variable {i+1}' for i in range(num_basic_variables)])
+    fig_dv = make_subplots(rows=num_basic_variables, cols=1,
+                           subplot_titles=[f'Decision Variable {i + 1}' for i in range(num_basic_variables)])
     row = 1
     for i in range(num_variables):
         if dv[0][i] != 0:  # Check if the variable is basic (non-zero in the first set of decision variables)
             values = [filtered_dv[j][i] for j in range(len(filtered_dv))]
-            fig_dv.add_trace(go.Scatter(x=filtered_eps, y=values, mode='lines+markers', name=f'Variable {i+1}'), row=row, col=1)
+            fig_dv.add_trace(go.Scatter(x=filtered_eps, y=values, mode='lines+markers', name=f'Variable {i + 1}'),
+                             row=row, col=1)
             row += 1
 
-    fig_dv.update_layout(height=300*num_basic_variables, title='Decision Variables Sensitivity Analysis', showlegend=False)
+    fig_dv.update_layout(height=300 * num_basic_variables, title='Decision Variables Sensitivity Analysis',
+                         showlegend=False)
     fig_dv.update_xaxes(title_text='Threshold')
     fig_dv.update_yaxes(title_text='Value')
     fig_dv.show()
+
+
+def create_dual_model(data_path):
+    """
+    Create and return the dual model of a given primal linear programming problem.
+
+    This function constructs the dual of a linear programming problem based on the matrices A, b, and c.
+    The primal problem is assumed to have the following form:
+
+    Minimize    Z = C^T X
+    subject to  A X <= b
+                X >= 0
+
+    The corresponding dual problem is formulated as:
+
+    Maximize    W = b^T y
+    subject to  A^T y <= C
+                y >= 0
+
+    Parameters:
+    data_path (str): Path to the directory containing JSON files for matrices A, b, and c.
+                     The matrices should be stored as 'A.json', 'b.json', and 'c.json'.
+
+    Returns:
+    gurobipy.Model: The constructed dual Gurobi model.
+
+    The function reads the matrices A, b, and c from the specified data path, then uses these to set up
+    and return the dual model. The dual model includes dual variables corresponding to the primal constraints,
+    and constraints derived from the primal objective function coefficients.
+
+    Example usage:
+    dual_model = create_dual_model("path_to_data")
+    """
+    # Load the matrices A, b, c, lb, ub
+    with open(os.path.join(data_path, 'A.json'), 'r') as file:
+        A = np.array(json.load(file))
+    with open(os.path.join(data_path, 'b.json'), 'r') as file:
+        b = np.array(json.load(file))
+    with open(os.path.join(data_path, 'c.json'), 'r') as file:
+        c = np.array(json.load(file))
+    # lb and ub are not needed for the dual problem as X >= 0
+
+    # Create the dual model
+    dual_model = gp.Model("dual_model")
+
+    # Add dual variables for each primal constraint
+    y = dual_model.addMVar(shape=A.shape[0], lb=0, name="y")
+
+    # Set the dual objective function
+    dual_model.setObjective(b @ y, gp.GRB.MAXIMIZE)
+
+    # Add dual constraints based on primal objective function coefficients
+    for i in range(A.shape[1]):
+        coef = A[:, i]
+        dual_model.addConstr(coef @ y <= c[i])
+
+    dual_model.update()
+    return dual_model

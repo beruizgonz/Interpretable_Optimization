@@ -132,7 +132,7 @@ if __name__ == "__main__":
 
     # Sensitivity analysis
     if config['sensitivity_analysis']['val']:
-        eps, of, dv = sensitivity_analysis(data_path, original_model, config['sensitivity_analysis'])
+        eps, of, dv, ind = sensitivity_analysis(data_path, original_model, config['sensitivity_analysis'])
 
     visual_sensitivity_analysis(eps, of, dv)
 
