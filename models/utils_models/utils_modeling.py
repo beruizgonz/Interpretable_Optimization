@@ -292,7 +292,7 @@ def reduction_features(threshold, A_norm, A):
     return red_A
 
 
-def sensitivity_analysis(data_path, original_model, params):
+def sensitivity_analysis(sens_data, original_model, params):
     """
     Perform a sensitivity analysis on a Gurobi model by varying a threshold that affects certain matrix elements.
 
@@ -304,7 +304,7 @@ def sensitivity_analysis(data_path, original_model, params):
     5. Records the threshold value, objective function value, and decision variables.
 
     Parameters:
-    data_path (str): Path to save and load data for the model.
+    sens_data (str): Path to save and load data for the model.
     original_model (gurobipy.Model): The original Gurobi model.
     params (dict): Dictionary with 'max_threshold', 'init_threshold', 'step_threshold' values for the analysis.
 
@@ -341,10 +341,10 @@ def sensitivity_analysis(data_path, original_model, params):
                    A_dense[i, j] != 0 and A_red_dense[i, j] == 0]
 
         # Save the matrices
-        save_json(A_red, b, c, lb, ub, data_path)
+        save_json(A_red, b, c, lb, ub, sens_data)
 
         # Create a new model from the saved matrices
-        iterative_model = build_model_from_json(data_path)
+        iterative_model = build_model_from_json(sens_data)
 
         # Solve the new model
         iterative_model.setParam('OutputFlag', 0)  # Optionally suppress Gurobi output
@@ -411,64 +411,6 @@ def visual_sensitivity_analysis(eps, of, dv):
     fig_dv.update_xaxes(title_text='Threshold')
     fig_dv.update_yaxes(title_text='Value')
     fig_dv.show()
-
-
-def create_dual_model(data_path):
-    """
-    Create and return the dual model of a given primal linear programming problem.
-
-    This function constructs the dual of a linear programming problem based on the matrices A, b, and c.
-    The primal problem is assumed to have the following form:
-
-    Minimize    Z = C^T X
-    subject to  A X <= b
-                X >= 0
-
-    The corresponding dual problem is formulated as:
-
-    Maximize    W = b^T y
-    subject to  A^T y <= C
-                y >= 0
-
-    Parameters:
-    data_path (str): Path to the directory containing JSON files for matrices A, b, and c.
-                     The matrices should be stored as 'A.json', 'b.json', and 'c.json'.
-
-    Returns:
-    gurobipy.Model: The constructed dual Gurobi model.
-
-    The function reads the matrices A, b, and c from the specified data path, then uses these to set up
-    and return the dual model. The dual model includes dual variables corresponding to the primal constraints,
-    and constraints derived from the primal objective function coefficients.
-
-    Example usage:
-    dual_model = create_dual_model("path_to_data")
-    """
-    # Load the matrices A, b, c, lb, ub
-    with open(os.path.join(data_path, 'A.json'), 'r') as file:
-        A = np.array(json.load(file))
-    with open(os.path.join(data_path, 'b.json'), 'r') as file:
-        b = np.array(json.load(file))
-    with open(os.path.join(data_path, 'c.json'), 'r') as file:
-        c = np.array(json.load(file))
-    # lb and ub are not needed for the dual problem as X >= 0
-
-    # Create the dual model
-    dual_model = gp.Model("dual_model")
-
-    # Add dual variables for each primal constraint
-    y = dual_model.addMVar(shape=A.shape[0], lb=0, name="y")
-
-    # Set the dual objective function
-    dual_model.setObjective(b @ y, gp.GRB.MAXIMIZE)
-
-    # Add dual constraints based on primal objective function coefficients
-    for i in range(A.shape[1]):
-        coef = A[:, i]
-        dual_model.addConstr(coef @ y <= c[i])
-
-    dual_model.update()
-    return dual_model
 
 
 def build_dual_model_from_json(data_path):

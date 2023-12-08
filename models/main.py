@@ -4,7 +4,7 @@ import logging
 from datetime import datetime
 from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices, \
     save_json, build_model_from_json, compare_models, normalize_features, reduction_features, sensitivity_analysis, \
-    visual_sensitivity_analysis, create_dual_model, build_dual_model_from_json
+    visual_sensitivity_analysis, build_dual_model_from_json
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -27,6 +27,7 @@ if __name__ == "__main__":
                               "threshold": 0.1},
               "create_presolved": False,
               "sensitivity_analysis": {"val": True,
+                                       "sens_path": 'sensitivity_analisys',
                                        "max_threshold": 0.3,
                                        "init_threshold": 0.01,
                                        "step_threshold": 0.001},
@@ -86,7 +87,6 @@ if __name__ == "__main__":
 
     log.info(
         f"{str(datetime.now())}: Creating dual model by loading A, b, c, lb and ub...")
-    # created_dual = create_dual_model(data_path)
     created_dual = build_dual_model_from_json(data_path)
     A_dual, b_dual, c_dual, lb_dual, ub_dual = get_model_matrices(created_dual)
 
@@ -107,17 +107,15 @@ if __name__ == "__main__":
         f"{str(datetime.now())}: Solving the created_dual model...")
     created_dual.setParam('OutputFlag', config['verbose'])
     created_dual.optimize()
-    created_dual_sol = created_dual.objVal
-
-    print("Status:", created_dual.status)
-
-    if created_dual.status == gp.GRB.INFEASIBLE:
+    try:
+        created_dual_sol = created_dual.objVal
+    except:
         created_dual.computeIIS()
         created_dual.write("model.ilp")
         print("Infeasible constraints written to 'model.ilp'")
+        print("Status:", created_dual.status)
 
-    dual_created_sol = created_dual.objVal
-
+    # =============================== Comparing solutions: original_primal X created_primal ============================
     obj_var, dec_var = compare_models(original_primal, created_primal)
     print(f"The absolute deviation of objective function value is {obj_var} "
           f"and the average deviation of decision variable values is {dec_var}.")
@@ -138,32 +136,22 @@ if __name__ == "__main__":
             if var.x != 0:
                 print(f"{var.VarName} =", var.x)
 
-    # Normalization
+    # ==================================== Normalizing Matrix A from original_primal ===================================
     if config['normalize_A']:
         A_norm, A_scaler = normalize_features(A)
     else:
         A_norm = A.copy()
 
-    # Reduction
+    # ============================== Reducing the normalized matrix A from original_primal =============================
     if config['Reduction_A']['val']:
         A_red = reduction_features(config['Reduction_A']['threshold'], A_norm, A)
 
-    # creating the presolved model
+    # =========================== Sensitivity analysis: Reducing A for different thresholds ============================
+    if config['sensitivity_analysis']['val']:
+        sens_data = os.path.join(data_path, config['sensitivity_analysis']['sens_path'])
+        eps, of, dv, ind = sensitivity_analysis(sens_data, original_primal, config['sensitivity_analysis'])
+        visual_sensitivity_analysis(eps, of, dv)
+
+    # ========================================== Creating the presolved model ==========================================
     if config['create_presolved']:
         presolved_model = original_primal.presolve()
-
-    # Sensitivity analysis
-    if config['sensitivity_analysis']['val']:
-        eps, of, dv, ind = sensitivity_analysis(data_path, original_primal, config['sensitivity_analysis'])
-
-    visual_sensitivity_analysis(eps, of, dv)
-
-
-
-
-
-
-
-
-
-
