@@ -14,8 +14,8 @@ if __name__ == "__main__":
 
     # ====================================== Defining initial configuration ============================================
     config = {"create_model": {"val": True,
-                               "n_variables": 5,
-                               "n_constraints": 3},
+                               "n_variables": 50,
+                               "n_constraints": 30},
               "load_model": {"val": False,
                              "name": 'original_model.mps'},
               "verbose": 0,
@@ -110,9 +110,9 @@ if __name__ == "__main__":
     try:
         created_dual_sol = created_dual.objVal
     except:
-        created_dual.computeIIS()
-        created_dual.write("model.ilp")
-        print("Infeasible constraints written to 'model.ilp'")
+        # created_dual.computeIIS()
+        # created_dual.write("model.ilp")
+        # print("Infeasible constraints written to 'model.ilp'")
         print("Status:", created_dual.status)
 
     # =============================== Comparing solutions: original_primal X created_primal ============================
