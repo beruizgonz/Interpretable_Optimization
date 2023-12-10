@@ -110,9 +110,6 @@ if __name__ == "__main__":
     try:
         created_dual_sol = created_dual.objVal
     except:
-        # created_dual.computeIIS()
-        # created_dual.write("model.ilp")
-        # print("Infeasible constraints written to 'model.ilp'")
         print("Status:", created_dual.status)
 
     # =============================== Comparing solutions: original_primal X created_primal ============================
