@@ -3,8 +3,10 @@ import gurobipy as gp
 import logging
 from datetime import datetime
 from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices, \
-    save_json, build_model_from_json, compare_models, normalize_features, reduction_features, sensitivity_analysis, \
-    visual_sensitivity_analysis, build_dual_model_from_json
+    save_json, build_model_from_json, compare_models, normalize_features, matrix_sparsification, \
+    sparsification_sensitivity_analysis, \
+    visual_sparsification_sensitivity, build_dual_model_from_json, visual_join_sparsification_sensitivity, \
+    constraint_distance_reduction_sensitivity_analysis
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -14,23 +16,31 @@ if __name__ == "__main__":
 
     # ====================================== Defining initial configuration ============================================
     config = {"create_model": {"val": True,
-                               "n_variables": 50,
-                               "n_constraints": 30},
+                               "n_variables": 25,
+                               "n_constraints": 10},
               "load_model": {"val": False,
                              "name": 'original_model.mps'},
-              "verbose": 0,
+              "verbose": 1,
               "print_detail_sol": True,
-              "save_original_model": False,
               "save_matrices": True,
+              "save_original_model": {"val": True,
+                                      "save_name": 'original_primal.mps'},
               "normalize_A": True,
               "Reduction_A": {"val": True,
                               "threshold": 0.1},
               "create_presolved": False,
-              "sensitivity_analysis": {"val": True,
-                                       "sens_path": 'sensitivity_analisys',
-                                       "max_threshold": 0.3,
-                                       "init_threshold": 0.01,
-                                       "step_threshold": 0.001},
+              "sparsification_sensitive_analysis": {"val": False,
+                                                    "primal_path": 'primal_sensitivity_analysis',
+                                                    "dual_path": 'dual_sensitivity_analysis',
+                                                    "max_threshold": 0.3,
+                                                    "init_threshold": 0.01,
+                                                    "step_threshold": 0.001},
+              "euclidian_reduction_sensitive_analysis": {"val": True,
+                                                         "primal_path": 'primal_sensitivity_analysis',
+                                                         "dual_path": 'dual_sensitivity_analysis',
+                                                         "max_threshold": 1,
+                                                         "init_threshold": 0.1,
+                                                         "step_threshold": 0.01},
               "create_dual": True
               }
 
@@ -62,10 +72,10 @@ if __name__ == "__main__":
         original_primal = gp.read(model_to_load)
 
     # ======================================= saving the original_primal model in the path =============================
-    if config["save_original_model"]:
+    if config["save_original_model"]["val"]:
         log.info(
             f"{str(datetime.now())}: Saving the original_primal...")
-        model_to_save = os.path.join(data_path, "original_primal.mps")
+        model_to_save = os.path.join(data_path, config["save_original_model"]["save_name"])
         original_primal.write(model_to_save)
 
     # ========================== Getting matrices A, b, c and the bound of the original model ==========================
@@ -119,19 +129,29 @@ if __name__ == "__main__":
 
     # printing detailed information about the models
     if config['print_detail_sol']:
-        print("============ Original Model ============")
-        print("Optimal Objective Value =", original_primal.objVal)
-        print("Basic Decision variables: ")
-        for var in original_primal.getVars():
-            if var.x != 0:
-                print(f"{var.VarName} =", var.x)
+        if original_primal.status == 2:
+            print("============ Original Model ============")
+            print("Optimal Objective Value =", original_primal.objVal)
+            print("Basic Decision variables: ")
+            for var in original_primal.getVars():
+                if var.x != 0:
+                    print(f"{var.VarName} =", var.x)
 
-        print("============ Created Model ============")
-        print("Optimal Objective Value =", created_primal.objVal)
-        print("Basic Decision variables: ")
-        for var in created_primal.getVars():
-            if var.x != 0:
-                print(f"{var.VarName} =", var.x)
+        if created_primal.status == 2:
+            print("============ Created Model ============")
+            print("Optimal Objective Value =", created_primal.objVal)
+            print("Basic Decision variables: ")
+            for var in created_primal.getVars():
+                if var.x != 0:
+                    print(f"{var.VarName} =", var.x)
+
+        if created_dual.status == 2:
+            print("============ Created Dual ============")
+            print("Optimal Objective Value =", created_dual.objVal)
+            print("Basic Decision variables: ")
+            for var in created_dual.getVars():
+                if var.x != 0:
+                    print(f"{var.VarName} =", var.x)
 
     # ==================================== Normalizing Matrix A from original_primal ===================================
     if config['normalize_A']:
@@ -141,13 +161,37 @@ if __name__ == "__main__":
 
     # ============================== Reducing the normalized matrix A from original_primal =============================
     if config['Reduction_A']['val']:
-        A_red = reduction_features(config['Reduction_A']['threshold'], A_norm, A)
+        A_red = matrix_sparsification(config['Reduction_A']['threshold'], A_norm, A)
 
-    # =========================== Sensitivity analysis: Reducing A for different thresholds ============================
-    if config['sensitivity_analysis']['val']:
-        sens_data = os.path.join(data_path, config['sensitivity_analysis']['sens_path'])
-        eps, of, dv, ind = sensitivity_analysis(sens_data, original_primal, config['sensitivity_analysis'])
-        visual_sensitivity_analysis(eps, of, dv)
+    # ===================== Sensitivity analysis on matrix sparsification for different thresholds =====================
+    if config['sparsification_sensitive_analysis']['val']:
+        primal_data = os.path.join(data_path, config['sparsification_sensitive_analysis']['primal_path'])
+        eps_p, of_p, dv_p, ind_p = sparsification_sensitivity_analysis(primal_data, original_primal,
+                                                                       config['sparsification_sensitive_analysis'])
+
+        dual_data = os.path.join(data_path, config['sparsification_sensitive_analysis']['dual_path'])
+        eps_d, of_d, dv_d, ind_d = sparsification_sensitivity_analysis(dual_data, created_dual,
+                                                                       config['sparsification_sensitive_analysis'],
+                                                                       model_to_use='dual')
+        # visual_sparsification_sensitivity(eps_p, of_p, dv_p)
+        visual_join_sparsification_sensitivity(eps_p, of_p, dv_p, of_d, dv_d)
+
+    # ===================== Sensitivity analysis on matrix sparsification for different thresholds =====================
+    if config['euclidian_reduction_sensitive_analysis']['val']:
+        primal_data = os.path.join(data_path, config['euclidian_reduction_sensitive_analysis']['primal_path'])
+        eps_p, of_p, dv_p, ind_p = (
+            constraint_distance_reduction_sensitivity_analysis(primal_data, original_primal,
+                                                               config[
+                                                                   'euclidian_reduction_sensitive_analysis']))
+
+        dual_data = os.path.join(data_path, config['euclidian_reduction_sensitive_analysis']['dual_path'])
+        eps_d, of_d, dv_d, ind_d = (
+            constraint_distance_reduction_sensitivity_analysis(dual_data, created_dual,
+                                                               config[
+                                                                   'euclidian_reduction_sensitive_analysis'],
+                                                               model_to_use='dual'))
+        # visual_sparsification_sensitivity(eps_p, of_p, dv_p)
+        visual_join_sparsification_sensitivity(eps_p, of_p, dv_p, of_d, dv_d)
 
     # ========================================== Creating the presolved model ==========================================
     if config['create_presolved']:

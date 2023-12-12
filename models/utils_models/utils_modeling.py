@@ -12,6 +12,8 @@ from plotly.subplots import make_subplots
 def create_original_model(n_variables, n_constraints):
     """
     Create a random linear programming (LP) model with the specified number of decision variables and constraints.
+    Minimize Z = C^T X
+    subject to: A X >= b, X >= 0
 
     Parameters:
     - n_variables (int): Number of decision variables.
@@ -31,14 +33,14 @@ def create_original_model(n_variables, n_constraints):
             variables[i] = model.addVar(name=f'x_{i}')
 
         # Set objective function with random coefficients
-        c = [random.uniform(-10, 10) for _ in range(n_variables)]
+        c = [random.uniform(1, 10) for _ in range(n_variables)]
         model.setObjective(gp.quicksum(c[i] * variables[i] for i in range(n_variables)), sense=gp.GRB.MINIMIZE)
 
         # Add random constraints
         A = np.random.randint(1, 101, size=(n_constraints, n_variables))
         b = np.random.randint(1, 101, size=(n_constraints))
         for i in range(n_constraints):
-            model.addConstr(gp.quicksum(A[i, j] * variables[j] for j in range(n_variables)) <= b[i],
+            model.addConstr(gp.quicksum(A[i, j] * variables[j] for j in range(n_variables)) >= b[i],
                             name=f'Constraint_{i}')
 
         # Update model
@@ -133,6 +135,9 @@ def build_model_from_json(data_path):
     """
     Build a Gurobi model from JSON files containing matrices and data.
 
+    Minimize Z = C^T X
+    subject to: A X >= b, X >= 0
+
     Parameters:
     - data_path (str): Path to the directory containing JSON files (A.json, b.json, c.json, lb.json, ub.json).
 
@@ -199,7 +204,7 @@ def build_model_from_json(data_path):
         coefficients = A.data[start:end]
 
         constraint_expr: LinExpr = gp.quicksum(coefficients[j] * x[variables[j]] for j in range(len(variables)))
-        model.addConstr(constraint_expr <= b[i], name=f'constraint_{i}')
+        model.addConstr(constraint_expr >= b[i], name=f'constraint_{i}')
         model.update()
     return model
 
@@ -264,10 +269,11 @@ def normalize_features(A):
     return norm_A, scalers
 
 
-def reduction_features(threshold, A_norm, A):
+def matrix_sparsification(threshold, A_norm, A):
     """
     Reduce features of a matrix A based on a threshold applied to its normalized form A_norm.
-
+    Used to note how the coefficients affect the overall problem
+    
     Parameters:
     threshold (float): The threshold value to apply.
     A_norm (scipy.sparse.csr_matrix): The normalized matrix.
@@ -292,7 +298,7 @@ def reduction_features(threshold, A_norm, A):
     return red_A
 
 
-def sensitivity_analysis(sens_data, original_model, params):
+def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='primal'):
     """
     Perform a sensitivity analysis on a Gurobi model by varying a threshold that affects certain matrix elements.
 
@@ -315,22 +321,22 @@ def sensitivity_analysis(sens_data, original_model, params):
       - dv is a list of decision variable values for each threshold.
     """
 
-    A, b, c, lb, ub = get_model_matrices(original_model)
+    A, b, c, lb, ub = get_model_matrices(model)
 
     # Calculate normalized A
     A_norm, _ = normalize_features(A)
 
     # Initialize lists to store results
     eps = [0]  # Start with 0 threshold
-    of = [original_model.objVal]  # Start with the objective value of the original model
-    dv = [np.array([var.x for var in original_model.getVars()])]  # Start with decision variables of original model
+    of = [model.objVal]  # Start with the objective value of the original model
+    dv = [np.array([var.x for var in model.getVars()])]  # Start with decision variables of original model
     changed_indices = [None]  # List to store indices changed at each threshold
 
     # Iterate over threshold values
     threshold = params['init_threshold']
     while threshold <= params['max_threshold']:
         # Calculate reduced A
-        A_red = reduction_features(threshold, A_norm, A)
+        A_red = matrix_sparsification(threshold, A_norm, A)
 
         # Convert A and A_red to dense format for comparison
         A_dense = A.toarray()
@@ -344,7 +350,10 @@ def sensitivity_analysis(sens_data, original_model, params):
         save_json(A_red, b, c, lb, ub, sens_data)
 
         # Create a new model from the saved matrices
-        iterative_model = build_model_from_json(sens_data)
+        if model_to_use == 'primal':
+            iterative_model = build_model_from_json(sens_data)
+        else:
+            iterative_model = build_dual_model_from_json(sens_data)
 
         # Solve the new model
         iterative_model.setParam('OutputFlag', 0)  # Optionally suppress Gurobi output
@@ -360,13 +369,13 @@ def sensitivity_analysis(sens_data, original_model, params):
             dv.append(np.array([var.x for var in iterative_model.getVars()]))
             print(
                 f"Threshold {np.round(threshold,4)} has changed {len(indices)} items, "
-                f"final objective function is: {np.round(iterative_model.objVal,6)}")
+                f"in {model_to_use}, final objective function is: {np.round(iterative_model.objVal,6)}")
         else:
             # Model did not find a solution
             eps.append(threshold)
             of.append(np.nan)  # Append NaN for objective function
             changed_indices.append(np.nan)
-            dv.append(np.full(len(original_model.getVars()), np.nan))
+            dv.append(np.full(len(model.getVars()), np.nan))
             print(f"Threshold {threshold} has no feasible solution")
 
         # Delete the model to free up resources
@@ -378,7 +387,7 @@ def sensitivity_analysis(sens_data, original_model, params):
     return eps, of, dv, changed_indices
 
 
-def visual_sensitivity_analysis(eps, of, dv):
+def visual_sparsification_sensitivity(eps, of, dv):
     # Filter non-NaN values and corresponding eps and dv
     filtered_eps = [eps[i] for i in range(len(of)) if not np.isnan(of[i])]
     filtered_of = [of[i] for i in range(len(of)) if not np.isnan(of[i])]
@@ -413,12 +422,50 @@ def visual_sensitivity_analysis(eps, of, dv):
     fig_dv.show()
 
 
+def visual_join_sparsification_sensitivity(eps, of_primal, dv_primal, of_dual, dv_dual):
+    # Filter non-NaN values for primal and dual
+    filtered_eps = [eps[i] for i in range(len(of_primal)) if not np.isnan(of_primal[i]) and not np.isnan(of_dual[i])]
+    filtered_of_primal = [of_primal[i] for i in range(len(of_primal)) if not np.isnan(of_primal[i])]
+    filtered_of_dual = [of_dual[i] for i in range(len(of_dual)) if not np.isnan(of_dual[i])]
+
+    # Plot for objective function (Primal and Dual)
+    fig_of = go.Figure()
+    fig_of.add_trace(go.Scatter(x=filtered_eps, y=filtered_of_primal, mode='lines+markers', name='Primal Objective Function'))
+    fig_of.add_trace(go.Scatter(x=filtered_eps, y=filtered_of_dual, mode='lines+markers', name='Dual Objective Function'))
+    fig_of.update_layout(title='Objective Function Sensitivity Analysis (Primal and Dual)', xaxis_title='Threshold',
+                         yaxis_title='Objective Function Value', legend_title="Models")
+    fig_of.show()
+
+    # Function to create subplots for decision variables
+    def plot_decision_variables(dv, title):
+        num_variables = len(dv[0])
+        num_basic_variables = sum([1 for var in dv[0] if var != 0])
+        fig_dv = make_subplots(rows=num_basic_variables, cols=1,
+                               subplot_titles=[f'Decision Variable {i + 1}' for i in range(num_basic_variables) if dv[0][i] != 0])
+        row = 1
+        for i in range(num_variables):
+            if dv[0][i] != 0:
+                values = [dv[j][i] for j in range(len(dv)) if dv[j][i] != np.nan]
+                fig_dv.add_trace(go.Scatter(x=filtered_eps, y=values, mode='lines+markers', name=f'Variable {i + 1}'),
+                                 row=row, col=1)
+                row += 1
+        fig_dv.update_layout(height=300 * num_basic_variables, title=title,
+                             showlegend=False, xaxis_title='Threshold', yaxis_title='Value')
+        fig_dv.show()
+
+    # Plot for primal decision variables
+    plot_decision_variables(dv_primal, 'Primal Decision Variables Sensitivity Analysis')
+
+    # Plot for dual decision variables
+    plot_decision_variables(dv_dual, 'Dual Decision Variables Sensitivity Analysis')
+
+
 def build_dual_model_from_json(data_path):
     """
     Build the dual of a Gurobi model from JSON files containing matrices and data, specifically for a linear
     programming problem of the form:
     Minimize Z = C^T X
-    subject to: A X <= b, X >= 0
+    subject to: A X >= b, X >= 0
 
     The dual problem is formulated as:
     Maximize W = b^T y
@@ -490,6 +537,85 @@ def build_dual_model_from_json(data_path):
         coefficients = A.data[start:end]
 
         constraint_expr: LinExpr = gp.quicksum(coefficients[j] * y[variables[j]] for j in range(len(variables)))
-        model.addConstr(constraint_expr >= b[i], name=f'constraint_{i}')
+        model.addConstr(constraint_expr <= b[i], name=f'constraint_{i}')
         model.update()
     return model
+
+
+def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params, model_to_use='primal'):
+    """
+    Perform sensitivity analysis on a Gurobi model by varying a threshold that affects the number of constraints
+    based on the Euclidean distance of each constraint to the zero vector.
+
+    Parameters:
+    sens_data (str): Path to save and load data for the model.
+    model (gurobipy.Model): The original Gurobi model.
+    params (dict): Dictionary with 'max_threshold', 'init_threshold', 'step_threshold' values for the analysis.
+
+    Returns:
+    tuple of lists: (eps, of, dv) where
+      - eps is a list of threshold values used,
+      - of is a list of objective function values for each threshold,
+      - dv is a list of decision variable values for each threshold.
+    """
+
+    A, b, c, lb, ub = get_model_matrices(model)
+
+    # Initialize lists to store results
+    eps = [0]  # Start with 0 threshold
+    of = [model.objVal]  # Start with the objective value of the original model
+    dv = [np.array([var.x for var in model.getVars()])]  # Start with decision variables of original model
+    changed_constraints = [None]  # List to store constraints removed at each threshold
+
+    # normalize A
+    A_norm, _ = normalize_features(A)
+
+    # Calculate Euclidean distance of each row in A to the zero vector
+    distances = np.linalg.norm(A_norm.toarray(), axis=1)
+
+    # Iterate over threshold values
+    threshold = params['init_threshold']
+    while threshold <= params['max_threshold']:
+
+        # Identify constraints to be removed based on threshold
+        to_remove = [i for i, dist in enumerate(distances) if dist < threshold]
+        A_reduced = np.delete(A.toarray(), to_remove, axis=0)
+        b_reduced = np.delete(b, to_remove)
+
+        # Save the matrices
+        save_json(sp.csr_matrix(A_reduced), b_reduced, c, lb, ub, sens_data)
+
+        # Create a new model from the saved matrices
+        if model_to_use == 'primal':
+            iterative_model = build_model_from_json(sens_data)
+        else:
+            iterative_model = build_dual_model_from_json(sens_data)
+
+        # Solve the new model
+        iterative_model.setParam('OutputFlag', 0)  # Optionally suppress Gurobi output
+        iterative_model.optimize()
+
+        # Update lists with results
+        # Check if the model found a solution
+        if iterative_model.status == gp.GRB.OPTIMAL:
+            # Model found a solution
+            eps.append(threshold)
+            of.append(iterative_model.objVal)
+            changed_constraints.append(to_remove)
+            dv.append(np.array([var.x for var in iterative_model.getVars()]))
+            print(f"Threshold {threshold}: Removed {len(to_remove)} constraints, Objective: {iterative_model.objVal}")
+        else:
+            # Model did not find a solution
+            eps.append(threshold)
+            of.append(np.nan)  # Append NaN for objective function
+            changed_constraints.append(np.nan)
+            dv.append(np.full(len(model.getVars()), np.nan))
+            print(f"Threshold {threshold}: No feasible solution")
+
+        # Delete the model to free up resources
+        del iterative_model
+
+        # Increment threshold
+        threshold += params['step_threshold']
+
+    return eps, of, dv, changed_constraints
