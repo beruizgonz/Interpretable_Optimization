@@ -16,7 +16,7 @@ if __name__ == "__main__":
 
     # ====================================== Defining initial configuration ============================================
     config = {"create_model": {"val": True,
-                               "n_variables": 10,
+                               "n_variables": 25,
                                "n_constraints": 10},
               "load_model": {"val": False,
                              "name": 'original_model.mps'},
@@ -29,7 +29,7 @@ if __name__ == "__main__":
               "Reduction_A": {"val": True,
                               "threshold": 0.1},
               "create_presolved": False,
-              "sparsification_sensitive_analysis": {"val": True,
+              "sparsification_sensitive_analysis": {"val": False,
                                                     "primal_path": 'primal_sensitivity_analysis',
                                                     "dual_path": 'dual_sensitivity_analysis',
                                                     "max_threshold": 0.3,
@@ -38,9 +38,9 @@ if __name__ == "__main__":
               "euclidian_reduction_sensitive_analysis": {"val": True,
                                                          "primal_path": 'primal_sensitivity_analysis',
                                                          "dual_path": 'dual_sensitivity_analysis',
-                                                         "max_threshold": 0.3,
-                                                         "init_threshold": 0.01,
-                                                         "step_threshold": 0.001},
+                                                         "max_threshold": 1,
+                                                         "init_threshold": 0.1,
+                                                         "step_threshold": 0.01},
               "create_dual": True
               }
 

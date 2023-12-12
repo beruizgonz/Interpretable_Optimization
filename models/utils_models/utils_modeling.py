@@ -567,14 +567,15 @@ def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params,
     dv = [np.array([var.x for var in model.getVars()])]  # Start with decision variables of original model
     changed_constraints = [None]  # List to store constraints removed at each threshold
 
+    # normalize A
+    A_norm, _ = normalize_features(A)
+
+    # Calculate Euclidean distance of each row in A to the zero vector
+    distances = np.linalg.norm(A_norm.toarray(), axis=1)
+
     # Iterate over threshold values
     threshold = params['init_threshold']
     while threshold <= params['max_threshold']:
-
-        # normalize A
-        A_norm, _ = normalize_features(A)
-        # Calculate Euclidean distance of each row in A to the zero vector
-        distances = np.linalg.norm(A_norm.toarray(), axis=1)
 
         # Identify constraints to be removed based on threshold
         to_remove = [i for i, dist in enumerate(distances) if dist < threshold]
