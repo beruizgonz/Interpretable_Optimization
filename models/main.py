@@ -219,3 +219,5 @@ if __name__ == "__main__":
     # ========================================== Creating the presolved model ==========================================
     if config['create_presolved']:
         presolved_model = original_primal.presolve()
+
+    #TODO: Automatizar as funcoes de criar dual e primal a partir de matrizes

@@ -341,6 +341,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
     of = [model.objVal]  # Start with the objective value of the original model
     dv = [np.array([var.x for var in model.getVars()])]  # Start with decision variables of original model
     changed_indices = [None]  # List to store indices changed at each threshold
+    # constraint_viol = [] # List to store infeasibility results
 
     # Iterate over threshold values
     threshold = params['init_threshold']
@@ -377,6 +378,14 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
             of.append(iterative_model.objVal)
             changed_indices.append(indices)
             dv.append(np.array([var.x for var in iterative_model.getVars()]))
+            # Access the decision variables
+            variables = iterative_model.getVars()
+            # Extract their values and store in a NumPy array
+            decisions = np.array([var.x for var in variables])
+            # calculate the constraint infeasibility
+            # _, perc_vio = measuring_constraint_infeasibility(model, decisions) TODO
+            # Store infeasibility results
+            # constraint_viol.append(perc_vio)
             print(
                 f"Threshold {np.round(threshold, 4)} has changed {len(indices)} items, "
                 f"in {model_to_use}, final objective function is: {np.round(iterative_model.objVal, 6)}")
@@ -385,6 +394,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
             eps.append(threshold)
             of.append(np.nan)  # Append NaN for objective function
             changed_indices.append(np.nan)
+            # constraint_viol.append(np.nan) TODO
             dv.append(np.full(len(model.getVars()), np.nan))
             print(f"Threshold {threshold} has no feasible solution")
 
@@ -394,6 +404,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
         # Increment threshold
         threshold += params['step_threshold']
 
+    # return eps, of, dv, changed_indices, constraint_viol TODO
     return eps, of, dv, changed_indices
 
 
@@ -677,3 +688,45 @@ def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params,
         threshold += params['step_threshold']
 
     return eps, of, dv, changed_constraints
+
+
+def measuring_constraint_infeasibility(target_model, decisions):
+    """
+    Measure the infeasibility of a solution with respect to a given LP model's constraints.
+
+    Parameters:
+    - target_model (gurobipy.Model): The Gurobi model whose constraints are to be checked.
+    - decisions (numpy.ndarray): Decision variable values from a modified model to be assessed.
+
+    The function iterates over the constraints of the target model, calculating the difference between the LHS and RHS.
+    It identifies violations based on the constraint type (<= or >=) and calculates the absolute and percentage violations.
+
+    Returns:
+    - A summary of violations, both in absolute terms and as percentages, for each constraint.
+    """
+
+    # Extract A and b from the target model
+    A, b, _, _, _ = get_model_matrices(target_model)
+
+    # Initialize arrays to store violations
+    abs_vio = []  # Absolute violations
+    perc_vio = [] # Percentage violations
+
+    # Iterate over the constraints
+    for i in range(A.shape[0]):
+        lhs = np.dot(A.getrow(i).toarray(), decisions)
+        rhs = b[i]
+
+        # Calculate absolute violation
+        abs_violation = max(0, lhs - rhs) if target_model.getConstrs()[i].Sense == '<' else max(0, rhs - lhs)
+        abs_vio.append(abs_violation)
+
+        # Calculate percentage violation
+        perc_violation = 0
+        if target_model.getConstrs()[i].Sense == '<' and lhs > rhs:
+            perc_violation = 100 * abs_violation / abs(rhs)
+        elif target_model.getConstrs()[i].Sense == '>' and lhs < rhs:
+            perc_violation = 100 * abs_violation / abs(rhs)
+        perc_vio.append(perc_violation)
+
+    return abs_vio, perc_vio
