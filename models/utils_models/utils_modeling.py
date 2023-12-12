@@ -55,15 +55,25 @@ def create_original_model(n_variables, n_constraints):
 
 def get_model_matrices(model):
     """
-    Extract the constraint matrix (A), right-hand side vector (b), and objective function coefficients (c) from a Gurobi model.
+    Extract key matrices and vectors from a Gurobi model. This function retrieves the constraint matrix (A),
+    right-hand side vector (b), objective function coefficients (c), and the lower (lb) and upper bounds (ub) of the
+    decision variables.
 
     Parameters:
-    - model (gurobipy.Model): The Gurobi model from which to extract matrices.
+    - model (gurobipy.Model): The Gurobi model from which to extract the matrices and vectors.
 
     Returns:
-    - A (numpy.ndarray): Constraint matrix A.
-    - b (numpy.ndarray): Right-hand side vector b.
-    - c (numpy.ndarray): Objective function coefficients c.
+    - A (scipy.sparse.csr_matrix): The constraint matrix A in CSR (Compressed Sparse Row) format.
+    - b (numpy.ndarray): The right-hand side vector b, containing the limits for each constraint.
+    - c (numpy.ndarray): The objective function coefficients c, representing the coefficients of the decision variables
+    in the objective function.
+    - lb (numpy.ndarray): An array of lower bounds for each decision variable.
+    - ub (numpy.ndarray): An array of upper bounds for each decision variable.
+
+    The constraint matrix A is represented in a sparse format to efficiently handle large-scale problems often
+    encountered in optimization.
+    The vectors b, c, lb, and ub provide critical information about the constraints and the feasible region of the
+    decision variables.
     """
     # Access constraint matrix A
     A = model.getA()
@@ -368,8 +378,8 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
             changed_indices.append(indices)
             dv.append(np.array([var.x for var in iterative_model.getVars()]))
             print(
-                f"Threshold {np.round(threshold,4)} has changed {len(indices)} items, "
-                f"in {model_to_use}, final objective function is: {np.round(iterative_model.objVal,6)}")
+                f"Threshold {np.round(threshold, 4)} has changed {len(indices)} items, "
+                f"in {model_to_use}, final objective function is: {np.round(iterative_model.objVal, 6)}")
         else:
             # Model did not find a solution
             eps.append(threshold)
@@ -388,6 +398,29 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
 
 
 def visual_sparsification_sensitivity(eps, of, dv):
+    """
+    Visualize the sensitivity analysis of a linear programming model's sparsification process.
+
+    This function generates two plots:
+    1. The change in the objective function value across different sparsification thresholds.
+    2. The variation in the values of the basic decision variables (non-zero variables in the solution) for each
+    threshold.
+
+    Parameters:
+    - eps (list): A list of sparsification thresholds used in the analysis.
+    - of (list): Corresponding objective function values for each threshold.
+    - dv (list of lists): Decision variable values for each threshold, where each inner list represents the decision
+    variables for a specific threshold.
+
+    The function first filters out instances where the objective function value is NaN (not a number), indicating an
+    infeasible solution. It then plots the viable objective function values against their corresponding thresholds.
+
+    For the decision variables, the function identifies which variables are basic (non-zero) in the initial solution
+    and creates individual plots for these variables, showing how their values change with different thresholds.
+
+    The resulting figures provide insight into how the model's solution, both in terms of the objective function and
+    the decision variables, is affected by varying levels of sparsification.
+        """
     # Filter non-NaN values and corresponding eps and dv
     filtered_eps = [eps[i] for i in range(len(of)) if not np.isnan(of[i])]
     filtered_of = [of[i] for i in range(len(of)) if not np.isnan(of[i])]
@@ -423,6 +456,28 @@ def visual_sparsification_sensitivity(eps, of, dv):
 
 
 def visual_join_sparsification_sensitivity(eps, of_primal, dv_primal, of_dual, dv_dual):
+    """
+    Visualize the sensitivity analysis of sparsification on both primal and dual linear programming models.
+
+    This function generates three sets of plots:
+    1. A combined plot of the objective function values for both primal and dual models across different
+    sparsification thresholds.
+    2. Individual plots for the variation in the values of basic (non-zero) decision variables in the primal model
+    for each threshold.
+    3. Similar plots for the basic decision variables in the dual model.
+
+    Parameters:
+    - eps (list): A list of sparsification thresholds used in the analysis.
+    - of_primal (list): Objective function values for the primal model at each threshold.
+    - dv_primal (list of lists): Decision variable values for the primal model at each threshold.
+    - of_dual (list): Objective function values for the dual model at each threshold.
+    - dv_dual (list of lists): Decision variable values for the dual model at each threshold.
+
+    The function filters out instances where either the primal or dual objective function values are NaN.
+    The first plot shows how the objective function values of both models vary with the thresholds, providing a
+    comparative view. The subsequent plots for decision variables in both primal and dual models visualize
+    the impact of sparsification on each model's decision variables.
+    """
     # Filter non-NaN values for primal and dual
     filtered_eps = [eps[i] for i in range(len(of_primal)) if not np.isnan(of_primal[i]) and not np.isnan(of_dual[i])]
     filtered_of_primal = [of_primal[i] for i in range(len(of_primal)) if not np.isnan(of_primal[i])]
@@ -430,8 +485,10 @@ def visual_join_sparsification_sensitivity(eps, of_primal, dv_primal, of_dual, d
 
     # Plot for objective function (Primal and Dual)
     fig_of = go.Figure()
-    fig_of.add_trace(go.Scatter(x=filtered_eps, y=filtered_of_primal, mode='lines+markers', name='Primal Objective Function'))
-    fig_of.add_trace(go.Scatter(x=filtered_eps, y=filtered_of_dual, mode='lines+markers', name='Dual Objective Function'))
+    fig_of.add_trace(
+        go.Scatter(x=filtered_eps, y=filtered_of_primal, mode='lines+markers', name='Primal Objective Function'))
+    fig_of.add_trace(
+        go.Scatter(x=filtered_eps, y=filtered_of_dual, mode='lines+markers', name='Dual Objective Function'))
     fig_of.update_layout(title='Objective Function Sensitivity Analysis (Primal and Dual)', xaxis_title='Threshold',
                          yaxis_title='Objective Function Value', legend_title="Models")
     fig_of.show()
@@ -441,7 +498,8 @@ def visual_join_sparsification_sensitivity(eps, of_primal, dv_primal, of_dual, d
         num_variables = len(dv[0])
         num_basic_variables = sum([1 for var in dv[0] if var != 0])
         fig_dv = make_subplots(rows=num_basic_variables, cols=1,
-                               subplot_titles=[f'Decision Variable {i + 1}' for i in range(num_basic_variables) if dv[0][i] != 0])
+                               subplot_titles=[f'Decision Variable {i + 1}' for i in range(num_basic_variables) if
+                                               dv[0][i] != 0])
         row = 1
         for i in range(num_variables):
             if dv[0][i] != 0:

@@ -15,21 +15,21 @@ log.setLevel('INFO')
 if __name__ == "__main__":
 
     # ====================================== Defining initial configuration ============================================
-    config = {"create_model": {"val": True,
-                               "n_variables": 25,
-                               "n_constraints": 10},
-              "load_model": {"val": False,
-                             "name": 'original_model.mps'},
+    config = {"create_model": {"val": False,
+                               "n_variables": 5,
+                               "n_constraints": 4},
+              "load_model": {"val": True,
+                             "name": 'problem1.mps'},
               "verbose": 1,
               "print_detail_sol": True,
               "save_matrices": True,
-              "save_original_model": {"val": True,
+              "save_original_model": {"val": False,
                                       "save_name": 'original_primal.mps'},
               "normalize_A": True,
               "Reduction_A": {"val": True,
-                              "threshold": 0.1},
+                              "threshold": 0.3},
               "create_presolved": False,
-              "sparsification_sensitive_analysis": {"val": False,
+              "sparsification_sensitive_analysis": {"val": True,
                                                     "primal_path": 'primal_sensitivity_analysis',
                                                     "dual_path": 'dual_sensitivity_analysis',
                                                     "max_threshold": 0.3,
@@ -38,7 +38,7 @@ if __name__ == "__main__":
               "euclidian_reduction_sensitive_analysis": {"val": True,
                                                          "primal_path": 'primal_sensitivity_analysis',
                                                          "dual_path": 'dual_sensitivity_analysis',
-                                                         "max_threshold": 1,
+                                                         "max_threshold": 1.4,
                                                          "init_threshold": 0.1,
                                                          "step_threshold": 0.01},
               "create_dual": True
@@ -156,13 +156,36 @@ if __name__ == "__main__":
     # ==================================== Normalizing Matrix A from original_primal ===================================
     if config['normalize_A']:
         A_norm, A_scaler = normalize_features(A)
+        b_norm = b/A_scaler
     else:
         A_norm = A.copy()
+        b_norm = b.copy
+    save_json(A_norm, b_norm, c, lb, ub, data_path)
+    created_primal_norm = build_model_from_json(data_path)
+    created_primal_norm.setParam('OutputFlag', config['verbose'])
+    created_primal_norm.optimize()
+    if created_primal_norm.status == 2:
+        print("============ Created Normalized Model ============")
+        print("Optimal Objective Value =", created_primal_norm.objVal)
+        print("Basic Decision variables: ")
+        for var in created_primal_norm.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
 
     # ============================== Reducing the normalized matrix A from original_primal =============================
     if config['Reduction_A']['val']:
         A_red = matrix_sparsification(config['Reduction_A']['threshold'], A_norm, A)
-
+    save_json(A_red, b, c, lb, ub, data_path)
+    created_primal_red = build_model_from_json(data_path)
+    created_primal_red.setParam('OutputFlag', config['verbose'])
+    created_primal_red.optimize()
+    if created_primal_red.status == 2:
+        print("============ Created Reduced Model ============")
+        print("Optimal Objective Value =", created_primal_red.objVal)
+        print("Basic Decision variables: ")
+        for var in created_primal_red.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
     # ===================== Sensitivity analysis on matrix sparsification for different thresholds =====================
     if config['sparsification_sensitive_analysis']['val']:
         primal_data = os.path.join(data_path, config['sparsification_sensitive_analysis']['primal_path'])
