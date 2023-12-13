@@ -69,12 +69,10 @@ def get_model_matrices(model):
     in the objective function.
     - lb (numpy.ndarray): An array of lower bounds for each decision variable.
     - ub (numpy.ndarray): An array of upper bounds for each decision variable.
-
-    The constraint matrix A is represented in a sparse format to efficiently handle large-scale problems often
-    encountered in optimization.
-    The vectors b, c, lb, and ub provide critical information about the constraints and the feasible region of the
-    decision variables.
+    - of_sense (int): The sense of the optimization (minimize or maximize).
+    - cons_senses (list): A list of senses for each constraint in the model.
     """
+
     # Access constraint matrix A
     A = model.getA()
 
@@ -88,32 +86,31 @@ def get_model_matrices(model):
     lb = np.array([var.LB for var in model.getVars()])
     ub = np.array([var.UB for var in model.getVars()])
 
-    #TODO sense, signal
+    # Access the sense of optimization
+    of_sense = model.ModelSense
 
-    return A, b, c, lb, ub
+    # Access the sense of each constraint
+    cons_senses = [constr.Sense for constr in model.getConstrs()]
+
+    return A, b, c, lb, ub, of_sense, cons_senses
 
 
-def save_json(A, b, c, lb, ub, save_path):
+def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path):
     """
-    Save matrices and data structures as JSON files.
+    Save matrices and data structures as JSON files, including the sense of optimization and constraints.
 
     Parameters:
     - A (scipy.sparse.csr_matrix): Constraint matrix as a CSR matrix.
-    - b (list): Right-hand side (RHS) vector as a list.
-    - c (list): Objective function coefficients as a list.
-    - lb (ndarray): Lower bounds as a NumPy ndarray.
-    - ub (ndarray): Upper bounds as a NumPy ndarray.
+    - b (numpy.ndarray): Right-hand side (RHS) vector.
+    - c (numpy.ndarray): Objective function coefficients.
+    - lb (numpy.ndarray): Lower bounds of variables.
+    - ub (numpy.ndarray): Upper bounds of variables.
+    - of_sense (int): Sense of optimization (1 for minimize, -1 for maximize).
+    - cons_senses (list): List of senses for each constraint.
     - save_path (str): Path to save JSON files.
 
-    Example usage:
-    save_json(A, b, c, lb, ub, 'data_path')
-
-    Data types:
-    - A: scipy.sparse.csr_matrix
-    - b: list
-    - c: list
-    - lb: ndarray
-    - ub: ndarray
+    The data includes the constraint matrix A, vectors b, c, lower bounds lb, upper bounds ub,
+    the sense of optimization, and the senses of each constraint.
     """
 
     # Create a dictionary to store the data
@@ -122,7 +119,9 @@ def save_json(A, b, c, lb, ub, save_path):
         'b': b,
         'c': c,
         'lb': lb,
-        'ub': ub
+        'ub': ub,
+        'of_sense': of_sense,
+        'cons_senses': cons_senses
     }
 
     # Ensure the save path exists
@@ -140,39 +139,27 @@ def save_json(A, b, c, lb, ub, save_path):
             with open(file_name, 'w') as file:
                 json.dump(data_list, file)
         else:
-            raise ValueError(f"Unsupported data type for {name}")
+            with open(file_name, 'w') as file:
+                json.dump(data, file)
 
 
 def build_model_from_json(data_path):
     """
-    Build a Gurobi model from JSON files containing matrices and data.
-
-    Minimize Z = C^T X
-    subject to: A X >= b, X >= 0
+    Build a Gurobi model from JSON files containing matrices, data, and model specifications.
 
     Parameters:
-    - data_path (str): Path to the directory containing JSON files (A.json, b.json, c.json, lb.json, ub.json).
+    - data_path (str): Path to the directory containing JSON files (A.json, b.json, c.json, lb.json, ub.json,
+    of_sense.json, cons_senses.json).
 
     Returns:
     - model (gurobipy.Model): Gurobi model constructed from the provided data.
-
-    This function assumes that matrix A is in scipy.sparse.csr_matrix format, and vectors b, c, lb, and ub
-    are in list or numpy.ndarray format. It creates a new Gurobi model, adds variables with bounds (lb and ub),
-    sets the objective function using vector c, and adds constraints based on matrix A and vector b.
-
-    Example usage:
-    model = build_model_from_json('data_path')
     """
 
     # Define the file names for JSON files
-    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json']
+    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json']
 
     # Initialize data variables
-    A = None
-    b = None
-    c = None
-    lb = None
-    ub = None
+    A, b, c, lb, ub, of_sense, cons_senses = None, None, None, None, None, None, None
 
     # Load data from JSON files
     for file_name in file_names:
@@ -181,9 +168,7 @@ def build_model_from_json(data_path):
             data = json.load(file)
 
             if file_name == 'A.json':
-                # Convert the loaded dense matrix back to a csr_matrix
-                dense_matrix = np.array(data)
-                A = sp.csr_matrix(dense_matrix)
+                A = sp.csr_matrix(np.array(data))
             elif file_name == 'b.json':
                 b = np.array(data)
             elif file_name == 'c.json':
@@ -192,32 +177,38 @@ def build_model_from_json(data_path):
                 lb = np.array(data)
             elif file_name == 'ub.json':
                 ub = np.array(data)
-
-    # Ensure A is a scipy.sparse.csr_matrix
-    if not isinstance(A, sp.csr_matrix):
-        raise ValueError("Matrix A is not in csr_matrix format")
+            elif file_name == 'of_sense.json':
+                of_sense = data
+            elif file_name == 'cons_senses.json':
+                cons_senses = data
 
     # Create a Gurobi model and add variables
     num_variables = len(c)
     model = gp.Model()
     x = model.addMVar(shape=num_variables, lb=lb, ub=ub, name='x')
     model.update()
-    # Create the objective expression using quicksum
+
+    # Set objective function
     objective_expr = gp.quicksum(c[i] * x[i] for i in range(num_variables))
+    model.setObjective(objective_expr, of_sense)
 
-    # Set the objective function to minimize
-    model.setObjective(objective_expr, gp.GRB.MINIMIZE)
-
-    # Add constraints using matrix A and vector b
+    # Add constraints
     for i in range(A.shape[0]):
         start = A.indptr[i]
         end = A.indptr[i + 1]
         variables = A.indices[start:end]
         coefficients = A.data[start:end]
 
-        constraint_expr: LinExpr = gp.quicksum(coefficients[j] * x[variables[j]] for j in range(len(variables)))
-        model.addConstr(constraint_expr >= b[i], name=f'constraint_{i}')
-        model.update()
+        constraint_expr = gp.quicksum(coefficients[j] * x[variables[j]] for j in range(len(variables)))
+        if cons_senses[i] == '<':
+            model.addConstr(constraint_expr <= b[i], name=f'constraint_{i}')
+        elif cons_senses[i] == '>':
+            model.addConstr(constraint_expr >= b[i], name=f'constraint_{i}')
+        elif cons_senses[i] == '=':
+            model.addConstr(constraint_expr == b[i], name=f'constraint_{i}')
+
+    model.update()
+
     return model
 
 
@@ -509,7 +500,7 @@ def visual_join_sparsification_sensitivity(eps, of_primal, dv_primal, of_dual, d
     # Function to create subplots for decision variables
     def plot_decision_variables(dv, title):
         num_variables = len(dv[0])
-        num_basic_variables = sum([1 for var in dv[0] if var != 0]) #TODO no filtrar, la base se cambia
+        num_basic_variables = sum([1 for var in dv[0] if var != 0])  # TODO no filtrar, la base se cambia
         fig_dv = make_subplots(rows=num_basic_variables, cols=1,
                                subplot_titles=[f'Decision Variable {i + 1}' for i in range(num_basic_variables) if
                                                dv[0][i] != 0])
@@ -533,38 +524,21 @@ def visual_join_sparsification_sensitivity(eps, of_primal, dv_primal, of_dual, d
 
 def build_dual_model_from_json(data_path):
     """
-    Build the dual of a Gurobi model from JSON files containing matrices and data, specifically for a linear
-    programming problem of the form:
-    Minimize Z = C^T X
-    subject to: A X >= b, X >= 0
-
-    The dual problem is formulated as:
-    Maximize W = b^T y
-    subject to: A^T y <= C, y >= 0
+    Build the dual of a Gurobi model from JSON files containing matrices, data, and model specifications.
 
     Parameters:
-    - data_path (str): Path to the directory containing JSON files (A.json, b.json, c.json, lb.json, ub.json).
+    - data_path (str): Path to the directory containing JSON files (A.json, b.json, c.json, lb.json, ub.json,
+    of_sense.json, cons_senses.json).
 
     Returns:
     - dual_model (gurobipy.Model): The dual Gurobi model constructed from the provided data.
-
-    This function assumes that matrix A is in scipy.sparse.csr_matrix format, and vectors b, c, lb, and ub
-    are in list or numpy.ndarray format. It creates a new Gurobi model for the dual, adds variables,
-    sets the dual objective function using vector b, and adds constraints based on matrix A^T and vector c.
-
-    Example usage:
-    dual_model = build_dual_model_from_json('data_path')
     """
 
     # Define the file names for JSON files
-    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json']
+    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json']
 
     # Initialize data variables
-    A = None
-    b = None
-    c = None
-    lb = None
-    ub = None
+    A_t, rhs, cost, lb, ub, of_sense, cons_senses = None, None, None, None, None, None, None
 
     # Load data from JSON files
     for file_name in file_names:
@@ -573,42 +547,44 @@ def build_dual_model_from_json(data_path):
             data = json.load(file)
 
             if file_name == 'A.json':
-                # Convert the loaded dense matrix back to a csr_matrix
-                dense_matrix = np.array(data)
-                dense_matrix_transpose = dense_matrix.transpose()
-                A = sp.csr_matrix(dense_matrix_transpose)
+                A_t = sp.csr_matrix(np.array(data).transpose())
             elif file_name == 'b.json':
-                c = np.array(data)
+                cost = np.array(data)
             elif file_name == 'c.json':
-                b = np.array(data)
+                rhs = np.array(data)
+            elif file_name == 'of_sense.json':
+                of_sense = data
+            elif file_name == 'cons_senses.json':
+                cons_senses = data
 
-    # Ensure A is a scipy.sparse.csr_matrix
-    if not isinstance(A, sp.csr_matrix):
-        raise ValueError("Matrix A is not in csr_matrix format")
-
-    # Create a Gurobi model and add variables
-    num_variables = len(c)
+    # Create a Gurobi model
+    model = gp.Model()
+    num_variables = len(cost)
     lb = np.full(num_variables, 0)
     ub = np.full(num_variables, np.inf)
 
-    model = gp.Model()
     y = model.addMVar(shape=num_variables, lb=lb, ub=ub, name='y')
     model.update()
-    # Create the objective expression using quicksum
-    objective_expr = gp.quicksum(c[i] * y[i] for i in range(num_variables))
 
-    # Set the objective function to maximize
-    model.setObjective(objective_expr, gp.GRB.MAXIMIZE)
+    # Create the objective expression using quicksum
+    objective_expr = gp.quicksum(cost[i] * y[i] for i in range(num_variables))
+
+    # Set the objective function of the dual model
+    model.setObjective(objective_expr, gp.GRB.MAXIMIZE if of_sense == 1 else gp.GRB.MINIMIZE)
 
     # Add constraints using matrix A and vector c
-    for i in range(A.shape[0]):
-        start = A.indptr[i]
-        end = A.indptr[i + 1]
-        variables = A.indices[start:end]
-        coefficients = A.data[start:end]
+    for i in range(A_t.shape[0]):
+        start = A_t.indptr[i]
+        end = A_t.indptr[i + 1]
+        variables = A_t.indices[start:end]
+        coefficients = A_t.data[start:end]
 
         constraint_expr: LinExpr = gp.quicksum(coefficients[j] * y[variables[j]] for j in range(len(variables)))
-        model.addConstr(constraint_expr <= b[i], name=f'constraint_{i}')
+        if of_sense == 1: # minimization
+            model.addConstr(constraint_expr <= rhs[i], name=f'constraint_{i}')
+        else: # maximization
+            model.addConstr(constraint_expr >= rhs[i], name=f'constraint_{i}')
+
         model.update()
     return model
 
@@ -712,7 +688,7 @@ def measuring_constraint_infeasibility(target_model, decisions):
 
     # Initialize arrays to store violations
     abs_vio = []  # Absolute violations
-    perc_vio = [] # Percentage violations
+    perc_vio = []  # Percentage violations
 
     # Iterate over the constraints
     for i in range(A.shape[0]):
@@ -730,6 +706,60 @@ def measuring_constraint_infeasibility(target_model, decisions):
         elif target_model.getConstrs()[i].Sense == '>' and lhs < rhs:
             perc_violation = 100 * abs_violation / abs(rhs)
         perc_vio.append(perc_violation)
-        #TODO tratamiento de divisiones por 0
+        # TODO tratamiento de divisiones por 0
 
     return abs_vio, perc_vio
+
+
+def pre_processing_model(model):
+    """
+    Pre-process a Gurobi model to ensure all constraints are in the standard format for
+    linear programming (A X >= b for minimization problems and A X <= b for maximization problems).
+    This function also handles equality constraints by splitting them into two inequalities.
+
+    Parameters:
+    - model (gurobipy.Model): The Gurobi model to be pre-processed.
+
+    Returns:
+    - pre_processed_model (gurobipy.Model): The pre-processed Gurobi model.
+    """
+
+    # Clone the original model to avoid altering it directly
+    pre_processed_model = model.copy()
+
+    # Iterate over each constraint in the model
+    for constr in pre_processed_model.getConstrs():
+        # Get the sense of the constraint
+        sense = constr.Sense
+
+        # For equality constraints, replace with two inequalities
+        if sense == gp.GRB.EQUAL:
+            # Get the linear expression and RHS value of the constraint
+            lhs_expr = pre_processed_model.getRow(constr)
+            rhs_value = constr.RHS
+
+            # Add two new constraints to replace the equality
+            pre_processed_model.addConstr(lhs_expr >= rhs_value, name=constr.ConstrName + "_geq")
+            pre_processed_model.addConstr(lhs_expr <= rhs_value, name=constr.ConstrName + "_leq")
+
+            # Remove the original equality constraint
+            pre_processed_model.remove(constr)
+
+        # For maximization problems, ensure all constraints are <=
+        elif model.ModelSense == -1 and sense == gp.GRB.GREATER_EQUAL:
+            # Flip the constraint to <=
+            lhs_expr = pre_processed_model.getRow(constr)
+            rhs_value = constr.RHS
+            pre_processed_model.addConstr(lhs_expr <= rhs_value, name=constr.ConstrName + "_leq")
+            pre_processed_model.remove(constr)
+
+        # For minimization problems, ensure all constraints are >=
+        elif model.ModelSense == 1 and sense == gp.GRB.LESS_EQUAL:
+            # Flip the constraint to >=
+            lhs_expr = pre_processed_model.getRow(constr)
+            rhs_value = constr.RHS
+            pre_processed_model.addConstr(lhs_expr >= rhs_value, name=constr.ConstrName + "_geq")
+            pre_processed_model.remove(constr)
+
+    return pre_processed_model
+
