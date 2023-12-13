@@ -745,8 +745,14 @@ def pre_processing_model(model):
             # Remove the original equality constraint
             pre_processed_model.remove(constr)
 
+    # Update model
+    pre_processed_model.update()
+
+    for constr in pre_processed_model.getConstrs():
+        # Get the sense of the constraint
+        sense = constr.Sense
         # For maximization problems, ensure all constraints are <=
-        elif model.ModelSense == -1 and sense == gp.GRB.GREATER_EQUAL:
+        if model.ModelSense == -1 and sense == gp.GRB.GREATER_EQUAL:
             # Flip the constraint to <=
             lhs_expr = pre_processed_model.getRow(constr)
             rhs_value = constr.RHS
@@ -754,11 +760,11 @@ def pre_processing_model(model):
             pre_processed_model.remove(constr)
 
         # For minimization problems, ensure all constraints are >=
-        elif model.ModelSense == 1 and sense == gp.GRB.LESS_EQUAL:
+        if model.ModelSense == 1 and sense == gp.GRB.LESS_EQUAL:
             # Flip the constraint to >=
             lhs_expr = pre_processed_model.getRow(constr)
             rhs_value = constr.RHS
-            pre_processed_model.addConstr(lhs_expr >= rhs_value, name=constr.ConstrName + "_geq")
+            pre_processed_model.addConstr(-1*lhs_expr >= -1*rhs_value, name=constr.ConstrName + "_geq")
             pre_processed_model.remove(constr)
 
     return pre_processed_model
