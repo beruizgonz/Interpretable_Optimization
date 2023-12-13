@@ -25,7 +25,7 @@ if __name__ == "__main__":
               "save_matrices": True,
               "save_original_model": {"val": False,
                                       "save_name": 'original_primal.mps'},
-              "normalize_A": True,
+              "normalize_A": False,
               "Reduction_A": {"val": True,
                               "threshold": 0.3},
               "create_presolved": False,

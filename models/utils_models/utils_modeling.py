@@ -88,6 +88,8 @@ def get_model_matrices(model):
     lb = np.array([var.LB for var in model.getVars()])
     ub = np.array([var.UB for var in model.getVars()])
 
+    #TODO sense, signal
+
     return A, b, c, lb, ub
 
 
@@ -507,7 +509,7 @@ def visual_join_sparsification_sensitivity(eps, of_primal, dv_primal, of_dual, d
     # Function to create subplots for decision variables
     def plot_decision_variables(dv, title):
         num_variables = len(dv[0])
-        num_basic_variables = sum([1 for var in dv[0] if var != 0])
+        num_basic_variables = sum([1 for var in dv[0] if var != 0]) #TODO no filtrar, la base se cambia
         fig_dv = make_subplots(rows=num_basic_variables, cols=1,
                                subplot_titles=[f'Decision Variable {i + 1}' for i in range(num_basic_variables) if
                                                dv[0][i] != 0])
@@ -728,5 +730,6 @@ def measuring_constraint_infeasibility(target_model, decisions):
         elif target_model.getConstrs()[i].Sense == '>' and lhs < rhs:
             perc_violation = 100 * abs_violation / abs(rhs)
         perc_vio.append(perc_violation)
+        #TODO tratamiento de divisiones por 0
 
     return abs_vio, perc_vio
