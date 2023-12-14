@@ -285,9 +285,9 @@ def matrix_sparsification(threshold, A_norm, A):
     Returns:
     red_A (scipy.sparse.csr_matrix): The reduced matrix.
     """
-    # Ensure A is in csr format for efficient row-wise operations
-    A = A.tocsr()
-    A_norm = A_norm.tocsr()
+    # Convert A to lil format for efficient row-wise operations
+    A = A.tolil()
+    A_norm = A_norm.tolil()
 
     # Create a copy of A to form red_A
     red_A = A.copy()
@@ -298,7 +298,8 @@ def matrix_sparsification(threshold, A_norm, A):
             if A_norm[i, j] < threshold:
                 red_A[i, j] = 0
 
-    return red_A
+    # Convert red_A back to csr format
+    return red_A.tocsr()
 
 
 def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='primal'):
@@ -589,6 +590,46 @@ def build_dual_model_from_json(data_path):
     return model
 
 
+def constraint_reduction(model, threshold, path):
+    """
+    Reduces the constraints of a given Gurobi model based on the Euclidean distance of each constraint's coefficients
+    to the zero vector. Constraints with a distance less than the specified threshold are removed.
+
+    Parameters:
+    - model (gurobipy.Model): The original Gurobi LP model to be reduced.
+    - threshold (float): The threshold for removing constraints based on their Euclidean distance to zero.
+    - path (str): Path to save the modified model matrices.
+
+    The function first extracts the model's matrices and normalizes the constraint matrix (A). It then calculates the
+    Euclidean distance of each constraint to the zero vector. Constraints with a distance less than the threshold are
+    identified as candidates for removal. The function then creates a new reduced model without these constraints and
+    saves the modified matrices to the specified path.
+    """
+
+    # Extract matrices and vectors from the model
+    A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(model)
+
+    # Normalize A
+    A_norm, _ = normalize_features(A)
+
+    # Calculate Euclidean distance of each row in A to the zero vector
+    distances = np.linalg.norm(A_norm.toarray(), axis=1)
+
+    # Identify constraints to be removed based on threshold
+    to_remove = [i for i, dist in enumerate(distances) if dist < threshold]
+    A_reduced = np.delete(A.toarray(), to_remove, axis=0)
+    b_reduced = np.delete(b, to_remove)
+
+    # Save the matrices
+    save_json(sp.csr_matrix(A_reduced), b_reduced, c, lb, ub, of_sense, cons_senses, path)
+
+    # Create a new model from the saved matrices
+    reduced_model = build_model_from_json(path)
+
+    return reduced_model
+
+
+
 def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params, model_to_use='primal'):
     """
     Perform sensitivity analysis on a Gurobi model by varying a threshold that affects the number of constraints
@@ -769,3 +810,33 @@ def pre_processing_model(model):
 
     return pre_processed_model
 
+
+def print_model_in_mathematical_format(model):
+    """
+    Prints a Gurobi model in a mathematical format.
+
+    Parameters:
+    - model (gurobipy.Model): The Gurobi model to be printed.
+    """
+
+    # Print the objective function
+    objective = 'Minimize\n' if model.ModelSense == 1 else 'Maximize\n'
+    objective += str(model.getObjective()) + '\n'
+
+    # Print the constraints
+    constraints = 'Subject To\n'
+    for constr in model.getConstrs():
+        constraints += str(model.getRow(constr)) + ' ' + constr.Sense + ' ' + str(constr.RHS) + '\n'
+
+    # Print variable bounds (if they are not default 0 and infinity)
+    bounds = 'Bounds\n'
+    for var in model.getVars():
+        lb = '' if var.LB == 0 else f'{var.LB} <= '
+        ub = '' if var.UB == gp.GRB.INFINITY else f' <= {var.UB}'
+        if lb != '' or ub != '':
+            bounds += lb + var.VarName + ub + '\n'
+
+    print(objective)
+    print(constraints)
+    if bounds.strip() != 'Bounds':
+        print(bounds)
