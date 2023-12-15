@@ -367,7 +367,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
     dv = [np.array([var.x for var in model.getVars()])]  # Start with decision variables of original model
     changed_indices = [None]  # List to store indices changed at each threshold
     constraint_viol = []  # List to store infeasibility results
-
+    of_dec = [model.objVal]
     # Iterate over threshold values
     threshold = params['init_threshold']
     while threshold <= params['max_threshold']:
@@ -405,8 +405,10 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
             # Extract their values and store in a NumPy array
             decisions = np.array([var.x for var in variables])
             # calculate the constraint infeasibility
-            abs_vio = measuring_constraint_infeasibility(model, decisions)
+            abs_vio, obj_val = measuring_constraint_infeasibility(model, decisions)
+
             # Store infeasibility results
+            of_dec.append(obj_val)
             constraint_viol.append(abs_vio)
             print(
                 f"Threshold {np.round(threshold, 4)} has changed {len(indices)} items, "
@@ -415,6 +417,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
             # Model did not find a solution
             eps.append(threshold)
             of.append(np.nan)  # Append NaN for objective function
+            of_dec.append(np.nan)
             changed_indices.append(np.nan)
             constraint_viol.append(np.nan)
             dv.append(np.full(len(model.getVars()), np.nan))
@@ -426,7 +429,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
         # Increment threshold
         threshold += params['step_threshold']
 
-    return eps, of, dv, changed_indices, constraint_viol
+    return eps, of, dv, changed_indices, constraint_viol, of_dec
 
 
 def visual_sparsification_sensitivity(eps, of, dv):
@@ -485,6 +488,55 @@ def visual_sparsification_sensitivity(eps, of, dv):
     fig_dv.update_xaxes(title_text='Threshold')
     fig_dv.update_yaxes(title_text='Value')
     fig_dv.show()
+
+def visual_join_sparsification_sensitivity2(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual, cviol_d):
+    """
+    Visualize the sensitivity analysis of sparsification on both primal and dual linear programming models.
+
+    Parameters:
+    - eps (list): A list of sparsification thresholds used in the analysis.
+    - of_primal (list): Objective function values for the primal model at each threshold.
+    - dv_primal (list of lists): Decision variable values for the primal model at each threshold.
+    - cviol_p (list of lists): Constraint violation values for the primal model at each threshold.
+    - of_dual (list): Objective function values for the dual model at each threshold.
+    - dv_dual (list of lists): Decision variable values for the dual model at each threshold.
+    - cviol_d (list of lists): Constraint violation values for the dual model at each threshold.
+    """
+
+    # Figure for Objective Function Sensitivity Analysis (Primal and Dual)
+    fig_of = go.Figure()
+    fig_of.add_trace(go.Scatter(x=eps, y=of_primal, mode='lines+markers', name='Primal Objective Function'))
+    fig_of.add_trace(go.Scatter(x=eps, y=of_dual, mode='lines+markers', name='Dual Objective Function'))
+    fig_of.update_layout(title='Objective Function Sensitivity Analysis (Primal and Dual)', xaxis_title='Threshold', yaxis_title='Objective Function Value')
+    fig_of.show()
+
+    # Figure for Primal Constraint Violation
+    fig_cviol_p = go.Figure()
+    for i in range(len(cviol_p[0])):
+        fig_cviol_p.add_trace(go.Scatter(x=eps, y=[cv[i] for cv in cviol_p], mode='lines+markers', name=f'Constraint {i + 1} (Primal)'))
+    fig_cviol_p.update_layout(title='Primal Constraint Violation', xaxis_title='Threshold', yaxis_title='Violation')
+    fig_cviol_p.show()
+
+    # Figure for Dual Constraint Violation
+    fig_cviol_d = go.Figure()
+    for i in range(len(cviol_d[0])):
+        fig_cviol_d.add_trace(go.Scatter(x=eps, y=[cv[i] for cv in cviol_d], mode='lines+markers', name=f'Constraint {i + 1} (Dual)'))
+    fig_cviol_d.update_layout(title='Dual Constraint Violation', xaxis_title='Threshold', yaxis_title='Violation')
+    fig_cviol_d.show()
+
+    # Figure for Primal Decision Variables Sensitivity Analysis
+    fig_dv_p = go.Figure()
+    for i, dv in enumerate(zip(*dv_primal)): # Transpose to iterate over each variable
+        fig_dv_p.add_trace(go.Scatter(x=eps, y=dv, mode='lines+markers', name=f'Variable {i + 1}'))
+    fig_dv_p.update_layout(title='Primal Decision Variables Sensitivity Analysis', xaxis_title='Threshold', yaxis_title='Decision Variable Value')
+    fig_dv_p.show()
+
+    # Figure for Dual Decision Variables Sensitivity Analysis
+    fig_dv_d = go.Figure()
+    for i, dv in enumerate(zip(*dv_dual)): # Transpose to iterate over each variable
+        fig_dv_d.add_trace(go.Scatter(x=eps, y=dv, mode='lines+markers', name=f'Variable {i + 1}'))
+    fig_dv_d.update_layout(title='Dual Decision Variables Sensitivity Analysis', xaxis_title='Threshold', yaxis_title='Decision Variable Value')
+    fig_dv_d.show()
 
 
 def visual_join_sparsification_sensitivity(eps, of_primal, dv_primal, of_dual, dv_dual):
@@ -750,11 +802,15 @@ def measuring_constraint_infeasibility(target_model, decisions):
     - A summary of violations, in absolute terms, for each constraint.
     """
 
-    # Extract A and b from the target model
-    A, b, _, _, _, _, _ = get_model_matrices(target_model)
+    # Extract A, b and c from the target model
+    A, b, c, _, _, _, _ = get_model_matrices(target_model)
+    cost = np.array(c)
 
     # Initialize arrays to store violations
     abs_vio = []  # Absolute violations
+
+    # Calculate the objective function value
+    obj_val = np.dot(cost, decisions)
 
     # Iterate over the constraints
     for i in range(A.shape[0]):
@@ -763,9 +819,11 @@ def measuring_constraint_infeasibility(target_model, decisions):
 
         # Calculate absolute violation
         abs_violation = max(0, lhs - rhs) if target_model.getConstrs()[i].Sense == '<' else max(0, rhs - lhs)
+        if isinstance(abs_violation, np.ndarray):
+            abs_violation = np.sum(abs_violation)
         abs_vio.append(abs_violation)
 
-    return abs_vio
+    return abs_vio, obj_val
 
 
 def pre_processing_model(model):

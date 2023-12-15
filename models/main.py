@@ -1,13 +1,15 @@
 import os
 import gurobipy as gp
 import logging
+import numpy as np
 from datetime import datetime
 from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices, \
     save_json, build_model_from_json, compare_models, normalize_features, matrix_sparsification, \
     sparsification_sensitivity_analysis, visual_sparsification_sensitivity, build_dual_model_from_json, \
     visual_join_sparsification_sensitivity, \
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \
-    print_model_in_mathematical_format, normalize_min_max
+    print_model_in_mathematical_format, normalize_min_max, visual_join_sparsification_sensitivity2, \
+    measuring_constraint_infeasibility
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -31,7 +33,7 @@ if __name__ == "__main__":
                                       "save_path": 'models_library'},
               "test_normalization": True,
               "test_sparsification": {"val": True,
-                                      "threshold": 0.05},
+                                      "threshold": 0.13},
               "test_constraint_red": {"val": True,
                                       "threshold": 0.8},
               "create_presolved": False,
@@ -216,13 +218,21 @@ if __name__ == "__main__":
 
     # ================================================ Test Sparsification =============================================
     if config['test_sparsification']['val']:
+        print_model_in_mathematical_format(created_primal)
         A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(original_primal)
         A_norm, A_scaler = normalize_features(A)
         A_red = matrix_sparsification(config['test_sparsification']['threshold'], A_norm, A)
         save_json(A_red, b, c, lb, ub, of_sense, cons_senses, current_matrices_path)
         created_primal_red = build_model_from_json(current_matrices_path)
+
+        print_model_in_mathematical_format(created_primal_red)
         created_primal_red.setParam('OutputFlag', config['verbose'])
         created_primal_red.optimize()
+
+        # Extract their values and store in a NumPy array
+        decisions = np.array([var.x for var in created_primal_red.getVars()])
+        # calculate the constraint infeasibility
+        abs_vio, obj_val = measuring_constraint_infeasibility(original_primal, decisions)
 
         if created_primal_red.status == 2:
             print("============ Reduced model - Sparsification ============")
@@ -250,15 +260,16 @@ if __name__ == "__main__":
 
     # ===================== Sensitivity analysis on matrix sparsification for different thresholds =====================
     if config['sparsification_sensitive_analysis']['val']:
-        eps_p, of_p, dv_p, ind_p, cviol_p = sparsification_sensitivity_analysis(current_matrices_path, original_primal,
+        eps_p, of_p, dv_p, ind_p, cviol_p, of_dec_p = sparsification_sensitivity_analysis(current_matrices_path, original_primal,
                                                                        config['sparsification_sensitive_analysis'],
                                                                        model_to_use='primal')
 
-        eps_d, of_d, dv_d, ind_d, cviol_d = sparsification_sensitivity_analysis(current_matrices_path, created_dual,
+        eps_d, of_d, dv_d, ind_d, cviol_d, of_dec_d = sparsification_sensitivity_analysis(current_matrices_path, created_dual,
                                                                        config['sparsification_sensitive_analysis'],
                                                                        model_to_use='dual')
         # visual_sparsification_sensitivity(eps_p, of_p, dv_p)
-        visual_join_sparsification_sensitivity(eps_p, of_p, dv_p, of_d, dv_d)
+        # visual_join_sparsification_sensitivity(eps_p, of_p, dv_p, of_d, dv_d)
+        visual_join_sparsification_sensitivity2(eps_p, of_p, dv_p, cviol_p, of_d, dv_d, cviol_d)
 
     # ===================== Sensitivity analysis on matrix sparsification for different thresholds =====================
     if config['euclidian_reduction_sensitive_analysis']['val']:
