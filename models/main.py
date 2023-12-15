@@ -4,10 +4,10 @@ import logging
 from datetime import datetime
 from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices, \
     save_json, build_model_from_json, compare_models, normalize_features, matrix_sparsification, \
-    sparsification_sensitivity_analysis, \
-    visual_sparsification_sensitivity, build_dual_model_from_json, visual_join_sparsification_sensitivity, \
+    sparsification_sensitivity_analysis, visual_sparsification_sensitivity, build_dual_model_from_json, \
+    visual_join_sparsification_sensitivity, \
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \
-    print_model_in_mathematical_format
+    print_model_in_mathematical_format, normalize_min_max
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -199,6 +199,7 @@ if __name__ == "__main__":
     # =============================================== Test Normalization ===============================================
     if config['test_normalization']:
         A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(original_primal)
+        # A_norm, b_norm = normalize_min_max(A, b)
         A_norm, A_scaler = normalize_features(A)
         b_norm = b / A_scaler
         save_json(A_norm, b_norm, c, lb, ub, of_sense, cons_senses, current_matrices_path)
@@ -249,11 +250,11 @@ if __name__ == "__main__":
 
     # ===================== Sensitivity analysis on matrix sparsification for different thresholds =====================
     if config['sparsification_sensitive_analysis']['val']:
-        eps_p, of_p, dv_p, ind_p = sparsification_sensitivity_analysis(current_matrices_path, original_primal,
+        eps_p, of_p, dv_p, ind_p, cviol_p = sparsification_sensitivity_analysis(current_matrices_path, original_primal,
                                                                        config['sparsification_sensitive_analysis'],
                                                                        model_to_use='primal')
 
-        eps_d, of_d, dv_d, ind_d = sparsification_sensitivity_analysis(current_matrices_path, created_dual,
+        eps_d, of_d, dv_d, ind_d, cviol_d = sparsification_sensitivity_analysis(current_matrices_path, created_dual,
                                                                        config['sparsification_sensitive_analysis'],
                                                                        model_to_use='dual')
         # visual_sparsification_sensitivity(eps_p, of_p, dv_p)

@@ -263,13 +263,44 @@ def normalize_features(A):
     # Normalize each row
     for i in range(A.shape[0]):
         row = A.getrow(i)
-        max_value = row.max()
+        max_value = np.abs(row).max()
 
         if max_value != 0:
             norm_A[i] = row / max_value
             scalers[i] = max_value
 
     return norm_A, scalers
+
+
+def normalize_min_max(A, b):
+    """
+    Normalize A (CSR matrix) by rows using Min-Max normalization, apply the same rule for b (list).
+
+    Parameters:
+    A (scipy.sparse.csr_matrix): The matrix to be normalized.
+    b (list): The right-hand-side vector.
+
+    Returns:
+    norm_A (scipy.sparse.csr_matrix): The normalized matrix.
+    norm_b (list): The normalized b vector.
+    """
+    norm_A = A.A.copy()
+    norm_b = np.array(b)
+
+    for i in range(norm_A.shape[0]):
+        row = norm_A[i]
+        min_value = row.min()
+        max_value = row.max()
+        range_value = max_value - min_value
+
+        if range_value != 0:
+            norm_A[i] = (row - min_value) / range_value
+            norm_b[i] = (norm_b[i] - min_value) / range_value
+        elif max_value != 0:
+            norm_A[i] = row / max_value
+            norm_b[i] /= max_value
+
+    return sp.csr_matrix(norm_A), norm_b.tolist()
 
 
 def matrix_sparsification(threshold, A_norm, A):
@@ -295,7 +326,7 @@ def matrix_sparsification(threshold, A_norm, A):
     # Iterate over each element in A_norm and set corresponding element in red_A to 0 if it's below the threshold
     for i in range(A_norm.shape[0]):
         for j in range(A_norm.shape[1]):
-            if A_norm[i, j] < threshold:
+            if abs(A_norm[i, j]) < threshold:
                 red_A[i, j] = 0
 
     # Convert red_A back to csr format
@@ -325,7 +356,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
       - dv is a list of decision variable values for each threshold.
     """
 
-    A, b, c, lb, ub = get_model_matrices(model)
+    A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(model)
 
     # Calculate normalized A
     A_norm, _ = normalize_features(A)
@@ -335,7 +366,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
     of = [model.objVal]  # Start with the objective value of the original model
     dv = [np.array([var.x for var in model.getVars()])]  # Start with decision variables of original model
     changed_indices = [None]  # List to store indices changed at each threshold
-    # constraint_viol = [] # List to store infeasibility results
+    constraint_viol = []  # List to store infeasibility results
 
     # Iterate over threshold values
     threshold = params['init_threshold']
@@ -352,16 +383,13 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
                    A_dense[i, j] != 0 and A_red_dense[i, j] == 0]
 
         # Save the matrices
-        save_json(A_red, b, c, lb, ub, sens_data)
+        save_json(A_red, b, c, lb, ub, of_sense, cons_senses, sens_data)
 
         # Create a new model from the saved matrices
-        if model_to_use == 'primal':
-            iterative_model = build_model_from_json(sens_data)
-        else:
-            iterative_model = build_dual_model_from_json(sens_data)
+        iterative_model = build_model_from_json(sens_data)
 
         # Solve the new model
-        iterative_model.setParam('OutputFlag', 0)  # Optionally suppress Gurobi output
+        iterative_model.setParam('OutputFlag', 0)
         iterative_model.optimize()
 
         # Update lists with results
@@ -377,9 +405,9 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
             # Extract their values and store in a NumPy array
             decisions = np.array([var.x for var in variables])
             # calculate the constraint infeasibility
-            # _, perc_vio = measuring_constraint_infeasibility(model, decisions) TODO
+            abs_vio = measuring_constraint_infeasibility(model, decisions)
             # Store infeasibility results
-            # constraint_viol.append(perc_vio)
+            constraint_viol.append(abs_vio)
             print(
                 f"Threshold {np.round(threshold, 4)} has changed {len(indices)} items, "
                 f"in {model_to_use}, final objective function is: {np.round(iterative_model.objVal, 6)}")
@@ -388,7 +416,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
             eps.append(threshold)
             of.append(np.nan)  # Append NaN for objective function
             changed_indices.append(np.nan)
-            # constraint_viol.append(np.nan) TODO
+            constraint_viol.append(np.nan)
             dv.append(np.full(len(model.getVars()), np.nan))
             print(f"Threshold {threshold} has no feasible solution")
 
@@ -398,8 +426,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
         # Increment threshold
         threshold += params['step_threshold']
 
-    # return eps, of, dv, changed_indices, constraint_viol TODO
-    return eps, of, dv, changed_indices
+    return eps, of, dv, changed_indices, constraint_viol
 
 
 def visual_sparsification_sensitivity(eps, of, dv):
@@ -581,9 +608,9 @@ def build_dual_model_from_json(data_path):
         coefficients = A_t.data[start:end]
 
         constraint_expr: LinExpr = gp.quicksum(coefficients[j] * y[variables[j]] for j in range(len(variables)))
-        if of_sense == 1: # minimization
+        if of_sense == 1:  # minimization
             model.addConstr(constraint_expr <= rhs[i], name=f'constraint_{i}')
-        else: # maximization
+        else:  # maximization
             model.addConstr(constraint_expr >= rhs[i], name=f'constraint_{i}')
 
         model.update()
@@ -627,7 +654,6 @@ def constraint_reduction(model, threshold, path):
     reduced_model = build_model_from_json(path)
 
     return reduced_model
-
 
 
 def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params, model_to_use='primal'):
@@ -721,15 +747,14 @@ def measuring_constraint_infeasibility(target_model, decisions):
     It identifies violations based on the constraint type (<= or >=) and calculates the absolute and percentage violations.
 
     Returns:
-    - A summary of violations, both in absolute terms and as percentages, for each constraint.
+    - A summary of violations, in absolute terms, for each constraint.
     """
 
     # Extract A and b from the target model
-    A, b, _, _, _ = get_model_matrices(target_model)
+    A, b, _, _, _, _, _ = get_model_matrices(target_model)
 
     # Initialize arrays to store violations
     abs_vio = []  # Absolute violations
-    perc_vio = []  # Percentage violations
 
     # Iterate over the constraints
     for i in range(A.shape[0]):
@@ -740,16 +765,7 @@ def measuring_constraint_infeasibility(target_model, decisions):
         abs_violation = max(0, lhs - rhs) if target_model.getConstrs()[i].Sense == '<' else max(0, rhs - lhs)
         abs_vio.append(abs_violation)
 
-        # Calculate percentage violation
-        perc_violation = 0
-        if target_model.getConstrs()[i].Sense == '<' and lhs > rhs:
-            perc_violation = 100 * abs_violation / abs(rhs)
-        elif target_model.getConstrs()[i].Sense == '>' and lhs < rhs:
-            perc_violation = 100 * abs_violation / abs(rhs)
-        perc_vio.append(perc_violation)
-        # TODO tratamiento de divisiones por 0
-
-    return abs_vio, perc_vio
+    return abs_vio
 
 
 def pre_processing_model(model):
@@ -805,7 +821,7 @@ def pre_processing_model(model):
             # Flip the constraint to >=
             lhs_expr = pre_processed_model.getRow(constr)
             rhs_value = constr.RHS
-            pre_processed_model.addConstr(-1*lhs_expr >= -1*rhs_value, name=constr.ConstrName + "_geq")
+            pre_processed_model.addConstr(-1 * lhs_expr >= -1 * rhs_value, name=constr.ConstrName + "_geq")
             pre_processed_model.remove(constr)
 
     return pre_processed_model
