@@ -23,7 +23,7 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'GAMS_library',
-                             "name": 'transport.mps'},
+                             "name": 'DINAM.mps'},
               "print_mathematical_format": True,
               "verbose": 0,
               "print_detail_sol": True,
@@ -160,12 +160,14 @@ if __name__ == "__main__":
     created_dual_sol = created_dual.objVal
 
     # =============================== Comparing solutions: original_primal X created_primal ============================
-    obj_var, dec_var = compare_models(original_primal, created_primal)
-    print(f"Create model X original model: The absolute deviation of objective function value is {obj_var} "
-          f"and the average deviation of decision variable values is {dec_var}.")
 
     # printing detailed information about the models
     if config['print_detail_sol']:
+
+        obj_var, dec_var = compare_models(original_primal, created_primal)
+        print(f"Create model X original model: The absolute deviation of objective function value is {obj_var} "
+              f"and the average deviation of decision variable values is {dec_var}.")
+
         if original_primal_bp.status == 2:
             print("============ Original Model (before pre-processing) ============")
             print("Optimal Objective Value =", original_primal_bp.objVal)
@@ -271,7 +273,7 @@ if __name__ == "__main__":
         # visual_join_sparsification_sensitivity(eps_p, of_p, dv_p, of_d, dv_d)
         visual_join_sparsification_sensitivity2(eps_p, of_p, dv_p, cviol_p, of_d, dv_d, cviol_d)
 
-    # ===================== Sensitivity analysis on matrix sparsification for different thresholds =====================
+    # ==================== Sensitivity analysis on constraint's reduction for different thresholds =====================
     if config['euclidian_reduction_sensitive_analysis']['val']:
         primal_data = os.path.join(data_path, config['euclidian_reduction_sensitive_analysis']['primal_path'])
         eps_p, of_p, dv_p, ind_p = (

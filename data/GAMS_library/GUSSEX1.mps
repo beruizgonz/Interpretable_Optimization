@@ -1,4 +1,4 @@
-* LP written by GAMS Convert at 12/13/23 22:39:32
+* LP written by GAMS Convert at 12/17/23 00:59:00
 *
 * Equation counts
 *     Total        E        G        L        N        X        C        B
@@ -7,12 +7,12 @@
 * Variable counts
 *                  x        b        i      s1s      s2s       sc       si
 *     Total     cont   binary  integer     sos1     sos2    scont     sint
-*         7        7        0        0        0        0        0        0
-* FX      0
+*        12       12        0        0        0        0        0        0
+* FX      5
 *
 * Nonzero counts
 *     Total    const       NL
-*        19       19        0
+*        23       23        0
 
 NAME          Convert
 *
@@ -36,10 +36,9 @@ COLUMNS
     x3        e1              -0.162
     x3        e2                   1
     x3        e6                   1
-    x4        e1              -0.225
+    x4        e1              -0.216
     x4        e3                   1
     x4        e4                   1
-    x5        e1              -0.162
     x5        e3                   1
     x5        e5                   1
     x6        e1              -0.126
@@ -47,12 +46,17 @@ COLUMNS
     x6        e6                   1
     x7        obj                  1
     x7        e1                   1
+    x8        e2                  -1
+    x9        e3                  -1
+    x10       e4                  -1
+    x11       e5                  -1
+    x12       e6                  -1
 RHS
-    rhs       e2                 350
-    rhs       e3                 600
-    rhs       e4                 325
-    rhs       e5                 300
-    rhs       e6                 275
 BOUNDS
  FR bnd       x7
+ FX bnd       x8                 401
+ FX bnd       x9                 549
+ FX bnd       x10                350
+ FX bnd       x11                300
+ FX bnd       x12                250
 ENDATA
