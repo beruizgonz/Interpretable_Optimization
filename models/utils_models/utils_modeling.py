@@ -185,7 +185,11 @@ def build_model_from_json(data_path):
     # Create a Gurobi model and add variables
     num_variables = len(c)
     model = gp.Model()
-    x = model.addMVar(shape=num_variables, lb=lb, ub=ub, name='x')
+
+    # Add variables with names starting from x1
+    x = []
+    for i in range(num_variables):
+        x.append(model.addVar(lb=lb[i], ub=ub[i], name=f'x{i + 1}'))
     model.update()
 
     # Set objective function
@@ -270,37 +274,6 @@ def normalize_features(A):
             scalers[i] = max_value
 
     return norm_A, scalers
-
-
-def normalize_min_max(A, b):
-    """
-    Normalize A (CSR matrix) by rows using Min-Max normalization, apply the same rule for b (list).
-
-    Parameters:
-    A (scipy.sparse.csr_matrix): The matrix to be normalized.
-    b (list): The right-hand-side vector.
-
-    Returns:
-    norm_A (scipy.sparse.csr_matrix): The normalized matrix.
-    norm_b (list): The normalized b vector.
-    """
-    norm_A = A.A.copy()
-    norm_b = np.array(b)
-
-    for i in range(norm_A.shape[0]):
-        row = norm_A[i]
-        min_value = row.min()
-        max_value = row.max()
-        range_value = max_value - min_value
-
-        if range_value != 0:
-            norm_A[i] = (row - min_value) / range_value
-            norm_b[i] = (norm_b[i] - min_value) / range_value
-        elif max_value != 0:
-            norm_A[i] = row / max_value
-            norm_b[i] /= max_value
-
-    return sp.csr_matrix(norm_A), norm_b.tolist()
 
 
 def matrix_sparsification(threshold, A_norm, A):
@@ -432,64 +405,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
     return eps, of, dv, changed_indices, constraint_viol, of_dec
 
 
-def visual_sparsification_sensitivity(eps, of, dv):
-    """
-    Visualize the sensitivity analysis of a linear programming model's sparsification process.
-
-    This function generates two plots:
-    1. The change in the objective function value across different sparsification thresholds.
-    2. The variation in the values of the basic decision variables (non-zero variables in the solution) for each
-    threshold.
-
-    Parameters:
-    - eps (list): A list of sparsification thresholds used in the analysis.
-    - of (list): Corresponding objective function values for each threshold.
-    - dv (list of lists): Decision variable values for each threshold, where each inner list represents the decision
-    variables for a specific threshold.
-
-    The function first filters out instances where the objective function value is NaN (not a number), indicating an
-    infeasible solution. It then plots the viable objective function values against their corresponding thresholds.
-
-    For the decision variables, the function identifies which variables are basic (non-zero) in the initial solution
-    and creates individual plots for these variables, showing how their values change with different thresholds.
-
-    The resulting figures provide insight into how the model's solution, both in terms of the objective function and
-    the decision variables, is affected by varying levels of sparsification.
-        """
-    # Filter non-NaN values and corresponding eps and dv
-    filtered_eps = [eps[i] for i in range(len(of)) if not np.isnan(of[i])]
-    filtered_of = [of[i] for i in range(len(of)) if not np.isnan(of[i])]
-    filtered_dv = [dv[i] for i in range(len(of)) if not np.isnan(of[i])]
-
-    # Plot for objective function
-    fig_of = go.Figure()
-    fig_of.add_trace(go.Scatter(x=filtered_eps, y=filtered_of, mode='lines+markers', name='Objective Function'))
-    fig_of.update_layout(title='Objective Function Sensitivity Analysis', xaxis_title='Threshold',
-                         yaxis_title='Objective Function Value')
-    fig_of.show()
-
-    # Determine number of basic decision variables (non-zero)
-    num_variables = len(dv[0])
-    num_basic_variables = sum([1 for var in dv[0] if var != 0])
-
-    # Create subplots for decision variables
-    fig_dv = make_subplots(rows=num_basic_variables, cols=1,
-                           subplot_titles=[f'Decision Variable {i + 1}' for i in range(num_basic_variables)])
-    row = 1
-    for i in range(num_variables):
-        if dv[0][i] != 0:  # Check if the variable is basic (non-zero in the first set of decision variables)
-            values = [filtered_dv[j][i] for j in range(len(filtered_dv))]
-            fig_dv.add_trace(go.Scatter(x=filtered_eps, y=values, mode='lines+markers', name=f'Variable {i + 1}'),
-                             row=row, col=1)
-            row += 1
-
-    fig_dv.update_layout(height=300 * num_basic_variables, title='Decision Variables Sensitivity Analysis',
-                         showlegend=False)
-    fig_dv.update_xaxes(title_text='Threshold')
-    fig_dv.update_yaxes(title_text='Value')
-    fig_dv.show()
-
-def visual_join_sparsification_sensitivity2(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual, cviol_d):
+def visual_join_sensitivity(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual, cviol_d):
     """
     Visualize the sensitivity analysis of sparsification on both primal and dual linear programming models.
 
@@ -507,99 +423,41 @@ def visual_join_sparsification_sensitivity2(eps, of_primal, dv_primal, cviol_p, 
     fig_of = go.Figure()
     fig_of.add_trace(go.Scatter(x=eps, y=of_primal, mode='lines+markers', name='Primal Objective Function'))
     fig_of.add_trace(go.Scatter(x=eps, y=of_dual, mode='lines+markers', name='Dual Objective Function'))
-    fig_of.update_layout(title='Objective Function Sensitivity Analysis (Primal and Dual)', xaxis_title='Threshold', yaxis_title='Objective Function Value')
+    fig_of.update_layout(title='Objective Function Sensitivity Analysis (Primal and Dual)', xaxis_title='Threshold',
+                         yaxis_title='Objective Function Value')
     fig_of.show()
 
     # Figure for Primal Constraint Violation
     fig_cviol_p = go.Figure()
     for i in range(len(cviol_p[0])):
-        fig_cviol_p.add_trace(go.Scatter(x=eps, y=[cv[i] for cv in cviol_p], mode='lines+markers', name=f'Constraint {i + 1} (Primal)'))
+        fig_cviol_p.add_trace(
+            go.Scatter(x=eps, y=[cv[i] for cv in cviol_p], mode='lines+markers', name=f'Constraint {i + 1} (Primal)'))
     fig_cviol_p.update_layout(title='Primal Constraint Violation', xaxis_title='Threshold', yaxis_title='Violation')
     fig_cviol_p.show()
 
     # Figure for Dual Constraint Violation
     fig_cviol_d = go.Figure()
     for i in range(len(cviol_d[0])):
-        fig_cviol_d.add_trace(go.Scatter(x=eps, y=[cv[i] for cv in cviol_d], mode='lines+markers', name=f'Constraint {i + 1} (Dual)'))
+        fig_cviol_d.add_trace(
+            go.Scatter(x=eps, y=[cv[i] for cv in cviol_d], mode='lines+markers', name=f'Constraint {i + 1} (Dual)'))
     fig_cviol_d.update_layout(title='Dual Constraint Violation', xaxis_title='Threshold', yaxis_title='Violation')
     fig_cviol_d.show()
 
     # Figure for Primal Decision Variables Sensitivity Analysis
     fig_dv_p = go.Figure()
-    for i, dv in enumerate(zip(*dv_primal)): # Transpose to iterate over each variable
+    for i, dv in enumerate(zip(*dv_primal)):  # Transpose to iterate over each variable
         fig_dv_p.add_trace(go.Scatter(x=eps, y=dv, mode='lines+markers', name=f'Variable {i + 1}'))
-    fig_dv_p.update_layout(title='Primal Decision Variables Sensitivity Analysis', xaxis_title='Threshold', yaxis_title='Decision Variable Value')
+    fig_dv_p.update_layout(title='Primal Decision Variables Sensitivity Analysis', xaxis_title='Threshold',
+                           yaxis_title='Decision Variable Value')
     fig_dv_p.show()
 
     # Figure for Dual Decision Variables Sensitivity Analysis
     fig_dv_d = go.Figure()
-    for i, dv in enumerate(zip(*dv_dual)): # Transpose to iterate over each variable
+    for i, dv in enumerate(zip(*dv_dual)):  # Transpose to iterate over each variable
         fig_dv_d.add_trace(go.Scatter(x=eps, y=dv, mode='lines+markers', name=f'Variable {i + 1}'))
-    fig_dv_d.update_layout(title='Dual Decision Variables Sensitivity Analysis', xaxis_title='Threshold', yaxis_title='Decision Variable Value')
+    fig_dv_d.update_layout(title='Dual Decision Variables Sensitivity Analysis', xaxis_title='Threshold',
+                           yaxis_title='Decision Variable Value')
     fig_dv_d.show()
-
-
-def visual_join_sparsification_sensitivity(eps, of_primal, dv_primal, of_dual, dv_dual):
-    """
-    Visualize the sensitivity analysis of sparsification on both primal and dual linear programming models.
-
-    This function generates three sets of plots:
-    1. A combined plot of the objective function values for both primal and dual models across different
-    sparsification thresholds.
-    2. Individual plots for the variation in the values of basic (non-zero) decision variables in the primal model
-    for each threshold.
-    3. Similar plots for the basic decision variables in the dual model.
-
-    Parameters:
-    - eps (list): A list of sparsification thresholds used in the analysis.
-    - of_primal (list): Objective function values for the primal model at each threshold.
-    - dv_primal (list of lists): Decision variable values for the primal model at each threshold.
-    - of_dual (list): Objective function values for the dual model at each threshold.
-    - dv_dual (list of lists): Decision variable values for the dual model at each threshold.
-
-    The function filters out instances where either the primal or dual objective function values are NaN.
-    The first plot shows how the objective function values of both models vary with the thresholds, providing a
-    comparative view. The subsequent plots for decision variables in both primal and dual models visualize
-    the impact of sparsification on each model's decision variables.
-    """
-    # Filter non-NaN values for primal and dual
-    filtered_eps = [eps[i] for i in range(len(of_primal)) if not np.isnan(of_primal[i]) and not np.isnan(of_dual[i])]
-    filtered_of_primal = [of_primal[i] for i in range(len(of_primal)) if not np.isnan(of_primal[i])]
-    filtered_of_dual = [of_dual[i] for i in range(len(of_dual)) if not np.isnan(of_dual[i])]
-
-    # Plot for objective function (Primal and Dual)
-    fig_of = go.Figure()
-    fig_of.add_trace(
-        go.Scatter(x=filtered_eps, y=filtered_of_primal, mode='lines+markers', name='Primal Objective Function'))
-    fig_of.add_trace(
-        go.Scatter(x=filtered_eps, y=filtered_of_dual, mode='lines+markers', name='Dual Objective Function'))
-    fig_of.update_layout(title='Objective Function Sensitivity Analysis (Primal and Dual)', xaxis_title='Threshold',
-                         yaxis_title='Objective Function Value', legend_title="Models")
-    fig_of.show()
-
-    # Function to create subplots for decision variables
-    def plot_decision_variables(dv, title):
-        num_variables = len(dv[0])
-        num_basic_variables = sum([1 for var in dv[0] if var != 0])  # TODO no filtrar, la base se cambia
-        fig_dv = make_subplots(rows=num_basic_variables, cols=1,
-                               subplot_titles=[f'Decision Variable {i + 1}' for i in range(num_basic_variables) if
-                                               dv[0][i] != 0])
-        row = 1
-        for i in range(num_variables):
-            if dv[0][i] != 0:
-                values = [dv[j][i] for j in range(len(dv)) if dv[j][i] != np.nan]
-                fig_dv.add_trace(go.Scatter(x=filtered_eps, y=values, mode='lines+markers', name=f'Variable {i + 1}'),
-                                 row=row, col=1)
-                row += 1
-        fig_dv.update_layout(height=300 * num_basic_variables, title=title,
-                             showlegend=False, xaxis_title='Threshold', yaxis_title='Value')
-        fig_dv.show()
-
-    # Plot for primal decision variables
-    plot_decision_variables(dv_primal, 'Primal Decision Variables Sensitivity Analysis')
-
-    # Plot for dual decision variables
-    plot_decision_variables(dv_dual, 'Dual Decision Variables Sensitivity Analysis')
 
 
 def build_dual_model_from_json(data_path):
@@ -643,7 +501,10 @@ def build_dual_model_from_json(data_path):
     lb = np.full(num_variables, 0)
     ub = np.full(num_variables, np.inf)
 
-    y = model.addMVar(shape=num_variables, lb=lb, ub=ub, name='y')
+    # Add variables with names starting from y1
+    y = []
+    for i in range(num_variables):
+        y.append(model.addVar(lb=lb[i], ub=ub[i], name=f'y{i + 1}'))
     model.update()
 
     # Create the objective expression using quicksum
@@ -725,19 +586,21 @@ def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params,
       - dv is a list of decision variable values for each threshold.
     """
 
-    A, b, c, lb, ub = get_model_matrices(model)
+    A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(model)
+
+    # Calculate normalized A
+    A_norm, _ = normalize_features(A)
 
     # Initialize lists to store results
     eps = [0]  # Start with 0 threshold
     of = [model.objVal]  # Start with the objective value of the original model
     dv = [np.array([var.x for var in model.getVars()])]  # Start with decision variables of original model
     changed_constraints = [None]  # List to store constraints removed at each threshold
-
-    # normalize A
-    A_norm, _ = normalize_features(A)
-
-    # Calculate Euclidean distance of each row in A to the zero vector
-    distances = np.linalg.norm(A_norm.toarray(), axis=1)
+    constraint_viol = []  # List to store infeasibility results
+    of_dec = [model.objVal]
+    # Iterate over threshold values
+    threshold = params['init_threshold']
+    distances = np.linalg.norm(A_norm.toarray(), axis=1)  # Euclidean distance of each row in A to the zero vector
 
     # Iterate over threshold values
     threshold = params['init_threshold']
@@ -749,16 +612,13 @@ def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params,
         b_reduced = np.delete(b, to_remove)
 
         # Save the matrices
-        save_json(sp.csr_matrix(A_reduced), b_reduced, c, lb, ub, sens_data)
+        save_json(sp.csr_matrix(A_reduced), b_reduced, c, lb, ub, of_sense, cons_senses, sens_data)
 
         # Create a new model from the saved matrices
-        if model_to_use == 'primal':
-            iterative_model = build_model_from_json(sens_data)
-        else:
-            iterative_model = build_dual_model_from_json(sens_data)
+        iterative_model = build_model_from_json(sens_data)
 
         # Solve the new model
-        iterative_model.setParam('OutputFlag', 0)  # Optionally suppress Gurobi output
+        iterative_model.setParam('OutputFlag', 0)  # suppress Gurobi output
         iterative_model.optimize()
 
         # Update lists with results
@@ -769,12 +629,25 @@ def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params,
             of.append(iterative_model.objVal)
             changed_constraints.append(to_remove)
             dv.append(np.array([var.x for var in iterative_model.getVars()]))
-            print(f"Threshold {threshold}: Removed {len(to_remove)} constraints, Objective: {iterative_model.objVal}")
+            # Access the decision variables
+            variables = iterative_model.getVars()
+            # Extract their values and store in a NumPy array
+            decisions = np.array([var.x for var in variables])
+            # calculate the constraint infeasibility
+            abs_vio, obj_val = measuring_constraint_infeasibility(model, decisions)
+            # Store infeasibility results
+            of_dec.append(obj_val)
+            constraint_viol.append(abs_vio)
+            print(
+                f"Threshold {np.round(threshold, 4)} has removed {len(to_remove)} constraints, "
+                f"in {model_to_use}, final objective function is: {np.round(iterative_model.objVal, 6)}")
         else:
             # Model did not find a solution
             eps.append(threshold)
             of.append(np.nan)  # Append NaN for objective function
+            of_dec.append(np.nan)
             changed_constraints.append(np.nan)
+            constraint_viol.append(np.nan)
             dv.append(np.full(len(model.getVars()), np.nan))
             print(f"Threshold {threshold}: No feasible solution")
 
@@ -784,7 +657,7 @@ def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params,
         # Increment threshold
         threshold += params['step_threshold']
 
-    return eps, of, dv, changed_constraints
+    return eps, of, dv, changed_constraints, constraint_viol, of_dec
 
 
 def measuring_constraint_infeasibility(target_model, decisions):

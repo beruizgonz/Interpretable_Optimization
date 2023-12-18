@@ -5,10 +5,9 @@ import numpy as np
 from datetime import datetime
 from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices, \
     save_json, build_model_from_json, compare_models, normalize_features, matrix_sparsification, \
-    sparsification_sensitivity_analysis, visual_sparsification_sensitivity, build_dual_model_from_json, \
-    visual_join_sparsification_sensitivity, \
+    sparsification_sensitivity_analysis, build_dual_model_from_json, \
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \
-    print_model_in_mathematical_format, normalize_min_max, visual_join_sparsification_sensitivity2, \
+    print_model_in_mathematical_format, visual_join_sensitivity, \
     measuring_constraint_infeasibility
 
 logging.basicConfig()
@@ -23,7 +22,7 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'GAMS_library',
-                             "name": 'DINAM.mps'},
+                             "name": 'DEA.mps'},
               "print_mathematical_format": True,
               "verbose": 0,
               "print_detail_sol": True,
@@ -271,24 +270,23 @@ if __name__ == "__main__":
                                                                        model_to_use='dual')
         # visual_sparsification_sensitivity(eps_p, of_p, dv_p)
         # visual_join_sparsification_sensitivity(eps_p, of_p, dv_p, of_d, dv_d)
-        visual_join_sparsification_sensitivity2(eps_p, of_p, dv_p, cviol_p, of_d, dv_d, cviol_d)
+        visual_join_sensitivity(eps_p, of_p, dv_p, cviol_p, of_d, dv_d, cviol_d)
 
     # ==================== Sensitivity analysis on constraint's reduction for different thresholds =====================
     if config['euclidian_reduction_sensitive_analysis']['val']:
-        primal_data = os.path.join(data_path, config['euclidian_reduction_sensitive_analysis']['primal_path'])
-        eps_p, of_p, dv_p, ind_p = (
-            constraint_distance_reduction_sensitivity_analysis(primal_data, original_primal,
+        eps_p2, of_p2, dv_p2, ind_p2, cviol_p2, of_dec_p2 = (
+            constraint_distance_reduction_sensitivity_analysis(current_matrices_path, original_primal,
                                                                config[
-                                                                   'euclidian_reduction_sensitive_analysis']))
+                                                                   'euclidian_reduction_sensitive_analysis'],
+                                                               model_to_use='primal'))
 
-        dual_data = os.path.join(data_path, config['euclidian_reduction_sensitive_analysis']['dual_path'])
-        eps_d, of_d, dv_d, ind_d = (
-            constraint_distance_reduction_sensitivity_analysis(dual_data, created_dual,
+        eps_d2, of_d2, dv_d2, ind_d2, cviol_d2, of_dec_d2 = (
+            constraint_distance_reduction_sensitivity_analysis(current_matrices_path, created_dual,
                                                                config[
                                                                    'euclidian_reduction_sensitive_analysis'],
                                                                model_to_use='dual'))
         # visual_sparsification_sensitivity(eps_p, of_p, dv_p)
-        visual_join_sparsification_sensitivity(eps_p, of_p, dv_p, of_d, dv_d)
+        visual_join_sensitivity(eps_p2, of_p2, dv_p2, cviol_p2, of_d2, dv_d2, cviol_d2)
 
     # ========================================== Creating the presolved model ==========================================
     if config['create_presolved']:
