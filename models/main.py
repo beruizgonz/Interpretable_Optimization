@@ -3,7 +3,7 @@ import gurobipy as gp
 import logging
 import numpy as np
 from datetime import datetime
-from Interpretable_Optimization.models.utils_models.utils_modeling import create_original_model, get_model_matrices, \
+from Interpretable_Optimization.models.utils_models.utils_functions import create_original_model, get_model_matrices, \
     save_json, build_model_from_json, compare_models, normalize_features, matrix_sparsification, \
     sparsification_sensitivity_analysis, build_dual_model_from_json, \
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \
@@ -261,13 +261,17 @@ if __name__ == "__main__":
 
     # ===================== Sensitivity analysis on matrix sparsification for different thresholds =====================
     if config['sparsification_sensitive_analysis']['val']:
-        eps_p, of_p, dv_p, ind_p, cviol_p, of_dec_p = sparsification_sensitivity_analysis(current_matrices_path, original_primal,
-                                                                       config['sparsification_sensitive_analysis'],
-                                                                       model_to_use='primal')
+        eps_p, of_p, dv_p, ind_p, cviol_p, of_dec_p = sparsification_sensitivity_analysis(current_matrices_path,
+                                                                                          original_primal,
+                                                                                          config[
+                                                                                              'sparsification_sensitive_analysis'],
+                                                                                          model_to_use='primal')
 
-        eps_d, of_d, dv_d, ind_d, cviol_d, of_dec_d = sparsification_sensitivity_analysis(current_matrices_path, created_dual,
-                                                                       config['sparsification_sensitive_analysis'],
-                                                                       model_to_use='dual')
+        eps_d, of_d, dv_d, ind_d, cviol_d, of_dec_d = sparsification_sensitivity_analysis(current_matrices_path,
+                                                                                          created_dual,
+                                                                                          config[
+                                                                                              'sparsification_sensitive_analysis'],
+                                                                                          model_to_use='dual')
         # visual_sparsification_sensitivity(eps_p, of_p, dv_p)
         # visual_join_sparsification_sensitivity(eps_p, of_p, dv_p, of_d, dv_d)
         visual_join_sensitivity(eps_p, of_p, dv_p, cviol_p, of_d, dv_d, cviol_d)
@@ -292,4 +296,3 @@ if __name__ == "__main__":
     if config['create_presolved']:
         presolved_model = original_primal.presolve()
 
-    # TODO: Automatizar as funcoes de criar dual e primal a partir de matrizes
