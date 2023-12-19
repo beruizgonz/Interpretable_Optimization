@@ -8,7 +8,7 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     sparsification_sensitivity_analysis, build_dual_model_from_json, \
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \
     print_model_in_mathematical_format, visual_join_sensitivity, \
-    measuring_constraint_infeasibility
+    measuring_constraint_infeasibility, quality_check, sparsification_test, constraint_reduction_test
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -22,10 +22,10 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'GAMS_library',
-                             "name": 'DEA.mps'},
-              "print_mathematical_format": True,
+                             "name": 'TRNSPORT.mps'},
+              "print_mathematical_format": False,
               "verbose": 0,
-              "print_detail_sol": True,
+              "print_detail_sol": False,
               "save_matrices": True,
               "save_original_model": {"val": True,
                                       "save_name": 'testing_transp.mps',
@@ -36,12 +36,12 @@ if __name__ == "__main__":
               "test_constraint_red": {"val": True,
                                       "threshold": 0.8},
               "create_presolved": False,
-              "sparsification_sensitive_analysis": {"val": True,
-                                                    "primal_path": 'primal_sensitivity_analysis',
-                                                    "dual_path": 'dual_sensitivity_analysis',
-                                                    "max_threshold": 0.3,
-                                                    "init_threshold": 0.01,
-                                                    "step_threshold": 0.001},
+              "sparsification_sa": {"val": True,
+                                    "primal_path": 'primal_sensitivity_analysis',
+                                    "dual_path": 'dual_sensitivity_analysis',
+                                    "max_threshold": 0.3,
+                                    "init_threshold": 0.01,
+                                    "step_threshold": 0.001},
               "euclidian_reduction_sensitive_analysis": {"val": True,
                                                          "primal_path": 'primal_sensitivity_analysis',
                                                          "dual_path": 'dual_sensitivity_analysis',
@@ -52,6 +52,9 @@ if __name__ == "__main__":
               }
 
     # ================================================== Directories to work ===========================================
+    log.info(
+        f"{str(datetime.now())}: Preparing directories...")
+
     # Get the directory of the current script (main.py)
     current_script_dir = os.path.dirname(os.path.abspath(__file__))
 
@@ -74,9 +77,12 @@ if __name__ == "__main__":
                                                    config['create_model']['n_constraints'])
     if config['load_model']['val']:
         log.info(
-            f"{str(datetime.now())}: Loading the original_model...")
+            f"{str(datetime.now())}: Loading the original_model - {config['load_model']['name']}...")
         # Specify the path to the MPS file you want to load
         model_to_load = os.path.join(data_path, config['load_model']['load_path'], config['load_model']['name'])
+
+        # Set the OutputFlag to 0 to suppress Gurobi output
+        gp.setParam('OutputFlag', 0)
 
         # Load the model from the MPS file
         original_primal_bp = gp.read(model_to_load)
@@ -118,6 +124,9 @@ if __name__ == "__main__":
 
     # ====================================== Printing model in mathematical format =====================================
     if config['print_mathematical_format']:
+        log.info(
+            f"{str(datetime.now())}: Printing detailed mathematical formulations...")
+
         print("==================== Original Model before pre-processing ==================== ")
         print_model_in_mathematical_format(original_primal_bp)
         print("==================== Original Model after pre-processing ==================== ")
@@ -135,13 +144,7 @@ if __name__ == "__main__":
     original_primal_bp_sol = original_primal_bp.objVal
 
     log.info(
-        f"{str(datetime.now())}: Solving the created_primal model...")
-    created_primal.setParam('OutputFlag', config['verbose'])
-    created_primal.optimize()
-    created_primal_sol = created_primal.objVal
-
-    log.info(
-        f"{str(datetime.now())}: Solving the original_primal model...")
+        f"{str(datetime.now())}: Solving the original_primal model (after pre-processing)...")
     original_primal.setParam('OutputFlag', config['verbose'])
     original_primal.optimize()
     original_primal_sol = original_primal.objVal
@@ -199,81 +202,58 @@ if __name__ == "__main__":
                 if var.x != 0:
                     print(f"{var.VarName} =", var.x)
 
-    # =============================================== Test Normalization ===============================================
-    if config['test_normalization']:
-        A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(original_primal)
-        # A_norm, b_norm = normalize_min_max(A, b)
-        A_norm, A_scaler = normalize_features(A)
-        b_norm = b / A_scaler
-        save_json(A_norm, b_norm, c, lb, ub, of_sense, cons_senses, current_matrices_path)
-        created_primal_norm = build_model_from_json(current_matrices_path)
-        created_primal_norm.setParam('OutputFlag', config['verbose'])
-        created_primal_norm.optimize()
-        if created_primal_norm.status == 2:
-            print("============ Created Normalized Model ============")
-            print("Optimal Objective Value =", created_primal_norm.objVal)
-            print("Basic Decision variables: ")
-            for var in created_primal_norm.getVars():
-                if var.x != 0:
-                    print(f"{var.VarName} =", var.x)
+    # ===================================================  Normalization ===============================================
+    log.info(
+        f"{str(datetime.now())}: Solving the normalized primal model...")
+
+    A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(original_primal)
+    A_norm, A_scaler = normalize_features(A)
+    b_norm = b / A_scaler
+    save_json(A_norm, b_norm, c, lb, ub, of_sense, cons_senses, current_matrices_path)
+    created_primal_norm = build_model_from_json(current_matrices_path)
+    created_primal_norm.setParam('OutputFlag', config['verbose'])
+    created_primal_norm.optimize()
+
+    # ==================================================== Quality check ===============================================
+
+    quality_check(original_primal_bp, original_primal, created_primal, created_dual, created_primal_norm,
+                  tolerance=1e-6)
+    log.info(
+        f"{str(datetime.now())}: Quality check passed...")
 
     # ================================================ Test Sparsification =============================================
     if config['test_sparsification']['val']:
-        print_model_in_mathematical_format(created_primal)
-        A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(original_primal)
-        A_norm, A_scaler = normalize_features(A)
-        A_red = matrix_sparsification(config['test_sparsification']['threshold'], A_norm, A)
-        save_json(A_red, b, c, lb, ub, of_sense, cons_senses, current_matrices_path)
-        created_primal_red = build_model_from_json(current_matrices_path)
-
-        print_model_in_mathematical_format(created_primal_red)
-        created_primal_red.setParam('OutputFlag', config['verbose'])
-        created_primal_red.optimize()
-
-        # Extract their values and store in a NumPy array
-        decisions = np.array([var.x for var in created_primal_red.getVars()])
-        # calculate the constraint infeasibility
-        abs_vio, obj_val = measuring_constraint_infeasibility(original_primal, decisions)
-
-        if created_primal_red.status == 2:
-            print("============ Reduced model - Sparsification ============")
-            print(f"Threshold: {config['test_sparsification']['threshold']}")
-            print("Optimal Objective Value =", created_primal_red.objVal)
-            print("Basic Decision variables: ")
-            for var in created_primal_red.getVars():
-                if var.x != 0:
-                    print(f"{var.VarName} =", var.x)
+        log.info(
+            f"{str(datetime.now())}: Results of the sparsification test:")
+        sparsification_test(original_primal, config, current_matrices_path)
 
     # ============================================ Test constraint reduction ===========================================
     if config['test_constraint_red']['val']:
-        red_model = constraint_reduction(original_primal, config['test_constraint_red']['threshold'],
-                                         current_matrices_path)
-        red_model.setParam('OutputFlag', config['verbose'])
-        red_model.optimize()
-        if red_model.status == 2:
-            print("============ Reduced model - Constraints reduction ============")
-            print(f"Threshold: {config['test_constraint_red']['threshold']}")
-            print("Optimal Objective Value =", red_model.objVal)
-            print("Basic Decision variables: ")
-            for var in red_model.getVars():
-                if var.x != 0:
-                    print(f"{var.VarName} =", var.x)
+        log.info(
+            f"{str(datetime.now())}: Results of the constraint reduction test:")
+        constraint_reduction_test(original_primal, config, current_matrices_path)
+
+    # ============================================== Test variable reduction ===========================================
+
+    # TODO
 
     # ===================== Sensitivity analysis on matrix sparsification for different thresholds =====================
-    if config['sparsification_sensitive_analysis']['val']:
+    if config['sparsification_sa']['val']:
+        log.info(
+            f"{str(datetime.now())}: Sensitivity analysis on matrix sparsification for different thresholds:")
+
         eps_p, of_p, dv_p, ind_p, cviol_p, of_dec_p = sparsification_sensitivity_analysis(current_matrices_path,
                                                                                           original_primal,
                                                                                           config[
-                                                                                              'sparsification_sensitive_analysis'],
+                                                                                              'sparsification_sa'],
                                                                                           model_to_use='primal')
 
         eps_d, of_d, dv_d, ind_d, cviol_d, of_dec_d = sparsification_sensitivity_analysis(current_matrices_path,
                                                                                           created_dual,
                                                                                           config[
-                                                                                              'sparsification_sensitive_analysis'],
+                                                                                              'sparsification_sa'],
                                                                                           model_to_use='dual')
-        # visual_sparsification_sensitivity(eps_p, of_p, dv_p)
-        # visual_join_sparsification_sensitivity(eps_p, of_p, dv_p, of_d, dv_d)
+        title = 'Sparsification'
         visual_join_sensitivity(eps_p, of_p, dv_p, cviol_p, of_d, dv_d, cviol_d)
 
     # ==================== Sensitivity analysis on constraint's reduction for different thresholds =====================
@@ -295,4 +275,3 @@ if __name__ == "__main__":
     # ========================================== Creating the presolved model ==========================================
     if config['create_presolved']:
         presolved_model = original_primal.presolve()
-

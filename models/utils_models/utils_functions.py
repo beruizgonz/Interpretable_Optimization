@@ -787,3 +787,151 @@ def print_model_in_mathematical_format(model):
     print(constraints)
     if bounds.strip() != 'Bounds':
         print(bounds)
+
+
+def quality_check(original_primal_bp, original_primal, created_primal, created_dual, created_primal_norm,
+                  tolerance=1e-6):
+    """
+    Performs a quality check on the provided optimization models, including a normalized model.
+
+    This function compares the objective function values and decision variables of the primal models
+    (original_primal_bp, original_primal, created_primal, and created_primal_norm) and checks if the
+    objective function value of the created_dual model matches that of the original_primal_bp model.
+
+    Parameters:
+    - original_primal_bp: The primal model before preprocessing.
+    - original_primal: The primal model after preprocessing.
+    - created_primal: The primal model created from matrices.
+    - created_dual: The dual model created from matrices.
+    - created_primal_norm: The normalized primal model.
+    - tolerance: A float representing the tolerance for comparison (default is 1e-6).
+
+    Raises:
+    - ValueError: If any of the quality checks fail.
+
+    Returns:
+    - None
+    """
+
+    # Compare objective values of the primal models
+    primal_models = [original_primal_bp, original_primal, created_primal, created_primal_norm]
+    for model1 in primal_models:
+        for model2 in primal_models:
+            if abs(model1.objVal - model2.objVal) > tolerance:
+                raise ValueError(
+                    f"Quality check failed: Objective function values differ between {model1.ModelName} and {model2.ModelName}")
+
+    # Compare decision variables of the primal models
+    for i in range(len(primal_models)):
+        for j in range(i + 1, len(primal_models)):
+            model1_vars = primal_models[i].getVars()
+            model2_vars = primal_models[j].getVars()
+            for var1, var2 in zip(model1_vars, model2_vars):
+                if abs(var1.x - var2.x) > tolerance:
+                    raise ValueError(
+                        f"Quality check failed: Decision variable {var1.VarName} differs between {primal_models[i].ModelName} and {primal_models[j].ModelName}")
+
+    # Compare objective value of created_dual and original_primal_bp
+    if abs(created_dual.objVal - original_primal_bp.objVal) > tolerance:
+        raise ValueError(
+            "Quality check failed: Objective function value differs between created_dual and original_primal_bp")
+
+
+def sparsification_test(original_model, config, current_matrices_path):
+    """
+    Tests the effects of sparsification on a linear programming model.
+
+    Parameters:
+    original_model: The original Gurobi model.
+    config: Configuration dictionary containing parameters for sparsification.
+    current_matrices_path: Path to save the JSON representation of the sparse model.
+
+    Returns:
+    None: The function prints the results.
+    """
+    # Extract matrices and vectors from the original model
+    A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(original_model)
+    A_norm, A_scaler = normalize_features(A)
+
+    # Apply matrix sparsification
+    A_red = matrix_sparsification(config['test_sparsification']['threshold'], A_norm, A)
+
+    # Save the sparse model to a JSON file
+    save_json(A_red, b, c, lb, ub, of_sense, cons_senses, current_matrices_path)
+
+    # Build and optimize the sparse model
+    created_primal_red = build_model_from_json(current_matrices_path)
+    created_primal_red.setParam('OutputFlag', config['verbose'])
+    created_primal_red.optimize()
+
+    # Extract decision variable values
+    decisions = np.array([var.x for var in created_primal_red.getVars()])
+
+    # Calculate the constraint infeasibility
+    abs_vio, obj_val = measuring_constraint_infeasibility(original_model, decisions)
+
+    # Print the results
+    if created_primal_red.status == 2:
+        print("============ Reduced model - Sparsification ============")
+        print(f"Threshold: {config['test_sparsification']['threshold']}")
+        print("Optimal Objective Value =", created_primal_red.objVal)
+        print("Basic Decision variables: ")
+        for var in created_primal_red.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
+
+        print("\nConstraint Violations:")
+        for idx, vio in enumerate(abs_vio):
+            print(f"Constraint {idx + 1}: Absolute Violation = {vio}")
+
+        total_violation = sum(abs_vio)
+        print(f"Total Absolute Violation: {total_violation}")
+
+    else:
+        print("The sparsification results in an infeasible solution")
+
+
+def constraint_reduction_test(original_model, config, current_matrices_path):
+    """
+    Tests the effects of constraint reduction on a linear programming model.
+
+    Parameters:
+    original_model: The original Gurobi model.
+    config: Configuration dictionary containing parameters for constraint reduction.
+    current_matrices_path: Path to save the reduced model.
+
+    Returns:
+    None: The function prints the results.
+    """
+    # Apply constraint reduction
+    red_model = constraint_reduction(original_model, config['test_constraint_red']['threshold'], current_matrices_path)
+
+    # Set verbosity and optimize the reduced model
+    red_model.setParam('OutputFlag', config['verbose'])
+    red_model.optimize()
+
+    # Extract decision variable values
+    decisions = np.array([var.x for var in red_model.getVars()])
+
+    # Calculate the constraint infeasibility
+    abs_vio, obj_val = measuring_constraint_infeasibility(red_model, decisions)
+
+    # Print the results
+    if red_model.status == 2:
+        print("============ Reduced model - Constraints reduction ============")
+        print(f"Threshold: {config['test_constraint_red']['threshold']}")
+        print("Optimal Objective Value =", red_model.objVal)
+        print("Basic Decision variables: ")
+        for var in red_model.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
+
+        print("\nConstraint Violations:")
+        for idx, vio in enumerate(abs_vio):
+            print(f"Constraint {idx + 1}: Absolute Violation = {vio}")
+
+        total_violation = sum(abs_vio)
+        print(f"Total Absolute Violation: {total_violation}")
+    else:
+        print("The reduction of constraints results in an infeasible solution")
+
