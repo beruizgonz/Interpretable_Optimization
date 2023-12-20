@@ -253,8 +253,10 @@ if __name__ == "__main__":
                                                                                           config[
                                                                                               'sparsification_sa'],
                                                                                           model_to_use='dual')
-        title = 'Sparsification'
-        visual_join_sensitivity(eps_p, of_p, dv_p, cviol_p, of_d, dv_d, cviol_d)
+        title_1 = 'Sparsification'
+        primal_sense = original_primal.ModelSense
+
+        visual_join_sensitivity(eps_p, of_p, dv_p, cviol_p, of_d, dv_d, cviol_d, title_1, primal_sense)
 
     # ==================== Sensitivity analysis on constraint's reduction for different thresholds =====================
     if config['euclidian_reduction_sensitive_analysis']['val']:
@@ -269,8 +271,10 @@ if __name__ == "__main__":
                                                                config[
                                                                    'euclidian_reduction_sensitive_analysis'],
                                                                model_to_use='dual'))
-        # visual_sparsification_sensitivity(eps_p, of_p, dv_p)
-        visual_join_sensitivity(eps_p2, of_p2, dv_p2, cviol_p2, of_d2, dv_d2, cviol_d2)
+
+        title_2 = 'Constraints Reduction'
+
+        visual_join_sensitivity(eps_p2, of_p2, dv_p2, cviol_p2, of_d2, dv_d2, cviol_d2, title_2, primal_sense)
 
     # ========================================== Creating the presolved model ==========================================
     if config['create_presolved']:

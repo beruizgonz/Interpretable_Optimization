@@ -405,7 +405,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
     return eps, of, dv, changed_indices, constraint_viol, of_dec
 
 
-def visual_join_sensitivity(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual, cviol_d):
+def visual_join_sensitivity(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual, cviol_d, title_n, primal_sense):
     """
     Visualize the sensitivity analysis of sparsification on both primal and dual linear programming models.
 
@@ -419,11 +419,22 @@ def visual_join_sensitivity(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual
     - cviol_d (list of lists): Constraint violation values for the dual model at each threshold.
     """
 
+    # Getting the sense of optimization for primal and dual
+    if primal_sense == 1:
+        primal_sens = '(Min)'
+        dual_sens = '(Max)'
+    else:
+        primal_sens = '(Max)'
+        dual_sens = '(Min)'
+
     # Figure for Objective Function Sensitivity Analysis (Primal and Dual)
     fig_of = go.Figure()
-    fig_of.add_trace(go.Scatter(x=eps, y=of_primal, mode='lines+markers', name='Primal Objective Function'))
-    fig_of.add_trace(go.Scatter(x=eps, y=of_dual, mode='lines+markers', name='Dual Objective Function'))
-    fig_of.update_layout(title='Objective Function Sensitivity Analysis (Primal and Dual)', xaxis_title='Threshold',
+    name_primal_1 = 'Primal Objective Function ' + primal_sens
+    name_dual_1 = 'Dual Objective Function ' + dual_sens
+    fig_of.add_trace(go.Scatter(x=eps, y=of_primal, mode='lines+markers', name=name_primal_1))
+    fig_of.add_trace(go.Scatter(x=eps, y=of_dual, mode='lines+markers', name=name_dual_1))
+    full_title_1 = 'Objective Function Sensitivity Analysis - ' + title_n
+    fig_of.update_layout(title=full_title_1, xaxis_title='Threshold',
                          yaxis_title='Objective Function Value')
     fig_of.show()
 
@@ -432,7 +443,8 @@ def visual_join_sensitivity(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual
     for i in range(len(cviol_p[0])):
         fig_cviol_p.add_trace(
             go.Scatter(x=eps, y=[cv[i] for cv in cviol_p], mode='lines+markers', name=f'Constraint {i + 1} (Primal)'))
-    fig_cviol_p.update_layout(title='Primal Constraint Violation', xaxis_title='Threshold', yaxis_title='Violation')
+    fig_cviol_p.update_layout(title='Primal Constraint Violation - ' + title_n, xaxis_title='Threshold',
+                              yaxis_title='Violation')
     fig_cviol_p.show()
 
     # Figure for Dual Constraint Violation
@@ -440,14 +452,15 @@ def visual_join_sensitivity(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual
     for i in range(len(cviol_d[0])):
         fig_cviol_d.add_trace(
             go.Scatter(x=eps, y=[cv[i] for cv in cviol_d], mode='lines+markers', name=f'Constraint {i + 1} (Dual)'))
-    fig_cviol_d.update_layout(title='Dual Constraint Violation', xaxis_title='Threshold', yaxis_title='Violation')
+    fig_cviol_d.update_layout(title='Dual Constraint Violation - ' + title_n, xaxis_title='Threshold',
+                              yaxis_title='Violation')
     fig_cviol_d.show()
 
     # Figure for Primal Decision Variables Sensitivity Analysis
     fig_dv_p = go.Figure()
     for i, dv in enumerate(zip(*dv_primal)):  # Transpose to iterate over each variable
         fig_dv_p.add_trace(go.Scatter(x=eps, y=dv, mode='lines+markers', name=f'Variable {i + 1}'))
-    fig_dv_p.update_layout(title='Primal Decision Variables Sensitivity Analysis', xaxis_title='Threshold',
+    fig_dv_p.update_layout(title='Primal Decision Variables Sensitivity Analysis - ' + title_n, xaxis_title='Threshold',
                            yaxis_title='Decision Variable Value')
     fig_dv_p.show()
 
@@ -455,7 +468,7 @@ def visual_join_sensitivity(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual
     fig_dv_d = go.Figure()
     for i, dv in enumerate(zip(*dv_dual)):  # Transpose to iterate over each variable
         fig_dv_d.add_trace(go.Scatter(x=eps, y=dv, mode='lines+markers', name=f'Variable {i + 1}'))
-    fig_dv_d.update_layout(title='Dual Decision Variables Sensitivity Analysis', xaxis_title='Threshold',
+    fig_dv_d.update_layout(title='Dual Decision Variables Sensitivity Analysis - ' + title_n, xaxis_title='Threshold',
                            yaxis_title='Decision Variable Value')
     fig_dv_d.show()
 
@@ -598,8 +611,6 @@ def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params,
     changed_constraints = [None]  # List to store constraints removed at each threshold
     constraint_viol = []  # List to store infeasibility results
     of_dec = [model.objVal]
-    # Iterate over threshold values
-    threshold = params['init_threshold']
     distances = np.linalg.norm(A_norm.toarray(), axis=1)  # Euclidean distance of each row in A to the zero vector
 
     # Iterate over threshold values
@@ -646,8 +657,8 @@ def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params,
             eps.append(threshold)
             of.append(np.nan)  # Append NaN for objective function
             of_dec.append(np.nan)
-            changed_constraints.append(np.nan)
-            constraint_viol.append(np.nan)
+            changed_constraints.append(to_remove)
+            constraint_viol.append(np.full(len(model.getConstrs()), np.nan).tolist())
             dv.append(np.full(len(model.getVars()), np.nan))
             print(f"Threshold {threshold}: No feasible solution")
 
@@ -934,4 +945,3 @@ def constraint_reduction_test(original_model, config, current_matrices_path):
         print(f"Total Absolute Violation: {total_violation}")
     else:
         print("The reduction of constraints results in an infeasible solution")
-
