@@ -4,9 +4,11 @@ import scipy.sparse as sp
 import gurobipy as gp
 import random
 import numpy as np
+import pandas as pd
 from gurobipy import LinExpr
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from tabulate import tabulate
 
 
 def create_original_model(n_variables, n_constraints):
@@ -336,10 +338,11 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
 
     # Initialize lists to store results
     eps = [0]  # Start with 0 threshold
-    of = [model.objVal]  # Start with the objective value of the original model
     dv = [np.array([var.x for var in model.getVars()])]  # Start with decision variables of original model
     changed_indices = [None]  # List to store indices changed at each threshold
-    constraint_viol = []  # List to store infeasibility results
+    abs_vio, obj_val = measuring_constraint_infeasibility(model, dv[0])
+    of = [obj_val]  # Start with the objective value of the original model
+    constraint_viol = [abs_vio]  # List to store infeasibility results
     of_dec = [model.objVal]
     # Iterate over threshold values
     threshold = params['init_threshold']
@@ -945,3 +948,95 @@ def constraint_reduction_test(original_model, config, current_matrices_path):
         print(f"Total Absolute Violation: {total_violation}")
     else:
         print("The reduction of constraints results in an infeasible solution")
+
+
+def get_info_GAMS(directory, save_excel=False):
+    """
+    Reads GAMS optimization models in a directory and prints a summary table using tabulate.
+
+    Parameters:
+    directory: The directory containing GAMS models.
+    save_excel: Boolean, if True, saves the summary table as an Excel file.
+
+    Returns:
+    None: Prints or saves the summary table.
+    """
+    data = []
+
+    for filename in os.listdir(directory):
+        if filename.endswith('.gms') or filename.endswith('.mps'):  # Add more file extensions if needed
+            model_path = os.path.join(directory, filename)
+
+            try:
+                # Read the model
+                model = gp.read(model_path)
+                model.setParam('OutputFlag', 0)
+                model.optimize()
+
+                # Extract information
+                num_constraints = model.NumConstrs
+                num_variables = model.NumVars
+                optimal_value = model.objVal if model.status == gp.GRB.OPTIMAL else np.nan
+
+                # Append to the data list
+                data.append([filename, num_constraints, num_variables, optimal_value])
+            except Exception as e:
+                print(f"Error processing {filename}: {e}")
+
+    # Create a DataFrame
+    df = pd.DataFrame(data, columns=['Name of LP', 'Number of Constraints', 'Number of Variables', 'Optimal Solution Value'])
+
+    # Print the table using tabulate
+    print(tabulate(df, headers='keys', tablefmt='grid'))
+
+    if save_excel:
+        output_file = os.path.join(directory, 'GAMS_Models_Summary.xlsx')
+        df.to_excel(output_file, index=False)
+        print(f"Summary saved to {output_file}")
+
+
+def detailed_info_models(original_primal_bp, original_primal, created_primal, created_dual):
+    """
+    Prints detailed information and comparisons for a set of optimization models.
+
+    Parameters:
+    - original_primal_bp: The original primal model before pre-processing.
+    - original_primal: The original primal model after pre-processing.
+    - created_primal: The primal model created from matrices.
+    - created_dual: The dual model created from matrices.
+    """
+    obj_var, dec_var = compare_models(original_primal, created_primal)
+    print(f"Create model X original model: The absolute deviation of objective function value is {obj_var} "
+          f"and the average deviation of decision variable values is {dec_var}.")
+
+    if original_primal_bp.status == 2:
+        print("============ Original Model (before pre-processing) ============")
+        print("Optimal Objective Value =", original_primal_bp.objVal)
+        print("Basic Decision variables: ")
+        for var in original_primal_bp.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
+
+    if original_primal.status == 2:
+        print("============ Original Model ============")
+        print("Optimal Objective Value =", original_primal.objVal)
+        print("Basic Decision variables: ")
+        for var in original_primal.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
+
+    if created_primal.status == 2:
+        print("============ Created Model ============")
+        print("Optimal Objective Value =", created_primal.objVal)
+        print("Basic Decision variables: ")
+        for var in created_primal.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
+
+    if created_dual.status == 2:
+        print("============ Created Dual ============")
+        print("Optimal Objective Value =", created_dual.objVal)
+        print("Basic Decision variables: ")
+        for var in created_dual.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
