@@ -9,6 +9,8 @@ from gurobipy import LinExpr
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 from tabulate import tabulate
+import time
+import sys
 
 
 def create_original_model(n_variables, n_constraints):
@@ -344,8 +346,14 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
     of = [obj_val]  # Start with the objective value of the original model
     constraint_viol = [abs_vio]  # List to store infeasibility results
     of_dec = [model.objVal]
+
+    # Calculate total iterations
+    total_iterations = int((params['max_threshold'] - params['init_threshold']) / params['step_threshold']) + 1
+    start_time = time.time()
+    iteration = 1  # Initialize iteration counter
     # Iterate over threshold values
     threshold = params['init_threshold']
+
     while threshold <= params['max_threshold']:
         # Calculate reduced A
         A_red = matrix_sparsification(threshold, A_norm, A)
@@ -386,9 +394,10 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
             # Store infeasibility results
             of_dec.append(obj_val)
             constraint_viol.append(abs_vio)
-            print(
-                f"Threshold {np.round(threshold, 4)} has changed {len(indices)} items, "
-                f"in {model_to_use}, final objective function is: {np.round(iterative_model.objVal, 6)}")
+            if params['prints']:
+                print(
+                    f"Threshold {np.round(threshold, 4)} has changed {len(indices)} items, "
+                    f"in {model_to_use}, final objective function is: {np.round(iterative_model.objVal, 6)}")
         else:
             # Model did not find a solution
             eps.append(threshold)
@@ -397,14 +406,24 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
             changed_indices.append(np.nan)
             constraint_viol.append(np.nan)
             dv.append(np.full(len(model.getVars()), np.nan))
-            print(f"Threshold {threshold} has no feasible solution")
+            if params['prints']:
+                print(f"Threshold {threshold} has no feasible solution")
 
         # Delete the model to free up resources
         del iterative_model
 
+        # Progress bar
+        progress = iteration / total_iterations
+        bar_length = 50  # Length of the progress bar
+        progress_bar = '>' * int(bar_length * progress) + ' ' * (bar_length - int(bar_length * progress))
+        sys.stdout.write(f"\r[{progress_bar}] Iteration {iteration}/{total_iterations}")
+        sys.stdout.flush()
+
+        iteration += 1  # Increment iteration counter
+
         # Increment threshold
         threshold += params['step_threshold']
-
+    print("\n")
     return eps, of, dv, changed_indices, constraint_viol, of_dec
 
 
@@ -537,7 +556,7 @@ def build_dual_model_from_json(data_path):
         coefficients = A_t.data[start:end]
 
         constraint_expr: LinExpr = gp.quicksum(coefficients[j] * y[variables[j]] for j in range(len(variables)))
-        if of_sense == 1:  # minimization
+        if of_sense == 1:  # minimization (primal)
             model.addConstr(constraint_expr <= rhs[i], name=f'constraint_{i}')
         else:  # maximization
             model.addConstr(constraint_expr >= rhs[i], name=f'constraint_{i}')
@@ -728,6 +747,36 @@ def pre_processing_model(model):
 
     # Clone the original model to avoid altering it directly
     pre_processed_model = model.copy()
+
+    # Find the highest index among existing decision variables
+    existing_vars = pre_processed_model.getVars()
+    max_index = max(
+        int(var.VarName[1:]) for var in existing_vars if var.VarName[0] == 'x' and var.VarName[1:].isdigit())
+    new_var_index = max_index + 1
+
+    # Handling variable bounds
+    for var in existing_vars:
+        lower_bound = var.LB
+        upper_bound = var.UB
+
+        if lower_bound > -gp.GRB.INFINITY:  # Has a lower bound
+            # Introduce new variable
+            new_var_name = f"x{new_var_index}"
+            new_var_index += 1
+            xj = pre_processed_model.addVar(lb=0, ub=gp.GRB.INFINITY, name=new_var_name)
+            pre_processed_model.addConstr(var == xj + lower_bound)
+            var.LB = -gp.GRB.INFINITY
+
+        if upper_bound < gp.GRB.INFINITY:  # Has an upper bound
+            # Introduce new variable
+            new_var_name = f"x{new_var_index}"
+            new_var_index += 1
+            xj = pre_processed_model.addVar(lb=0, ub=gp.GRB.INFINITY, name=new_var_name)
+            pre_processed_model.addConstr(var == -xj + upper_bound)
+            var.UB = gp.GRB.INFINITY
+
+    # Update model after handling variable bounds
+    pre_processed_model.update()
 
     # Iterate over each constraint in the model
     for constr in pre_processed_model.getConstrs():

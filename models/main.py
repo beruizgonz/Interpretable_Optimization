@@ -27,23 +27,24 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'GAMS_library',
-                             "name": 'TRNSPORT.mps'},
+                             "name": 'EPSCM.mps'},
               "print_mathematical_format": False,
               "verbose": 0,
-              "print_detail_sol": True,
+              "print_detail_sol": False,
               "save_original_model": {"val": False,
                                       "save_name": 'testing_transp.mps',
                                       "save_path": 'models_library'},
-              "test_normalization": True,
-              "test_sparsification": {"val": True,
+              "test_normalization": False,
+              "test_sparsification": {"val": False,
                                       "threshold": 0.13},
-              "test_constraint_red": {"val": True,
+              "test_constraint_red": {"val": False,
                                       "threshold": 0.8},
               "create_presolved": False,
               "sparsification_sa": {"val": True,
                                     "primal_path": 'primal_sensitivity_analysis',
                                     "dual_path": 'dual_sensitivity_analysis',
                                     "plots": False,
+                                    "prints": False,
                                     "max_threshold": 0.3,
                                     "init_threshold": 0.01,
                                     "step_threshold": 0.001},
@@ -114,12 +115,15 @@ if __name__ == "__main__":
         return defaultdict(nested_dict)
 
     sparsification_results = defaultdict(nested_dict)
+    total_models = len(model_files)
 
-    for model_file in model_files:
+    for index, model_file in enumerate(model_files, start=1):
         model_to_load = os.path.join(model_path, model_file)
         model_name = model_file.replace('.mps', '')
         gp.setParam('OutputFlag', 0)
         original_primal_bp = gp.read(model_to_load)
+
+        log.info(f"{datetime.now()}: Processing Model {index} of {total_models} - {model_name}")
 
         # =============================================== Pre-processing the model =====================================
         log.info(
@@ -241,11 +245,14 @@ if __name__ == "__main__":
             log.info(
                 f"{str(datetime.now())}: Sensitivity analysis on matrix sparsification for different thresholds:")
 
+            log.info(f"{datetime.now()}: Processing primal...")
             eps_p, of_p, dv_p, ind_p, cviol_p, of_dec_p = sparsification_sensitivity_analysis(current_matrices_path,
                                                                                               original_primal,
                                                                                               config[
                                                                                                   'sparsification_sa'],
                                                                                               model_to_use='primal')
+
+            log.info(f"{datetime.now()}: Processing dual...")
 
             eps_d, of_d, dv_d, ind_d, cviol_d, of_dec_d = sparsification_sensitivity_analysis(current_matrices_path,
                                                                                               created_dual,
