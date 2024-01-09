@@ -4,9 +4,13 @@ import scipy.sparse as sp
 import gurobipy as gp
 import random
 import numpy as np
+import pandas as pd
 from gurobipy import LinExpr
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
+from tabulate import tabulate
+import time
+import sys
 
 
 def create_original_model(n_variables, n_constraints):
@@ -336,13 +340,20 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
 
     # Initialize lists to store results
     eps = [0]  # Start with 0 threshold
-    of = [model.objVal]  # Start with the objective value of the original model
     dv = [np.array([var.x for var in model.getVars()])]  # Start with decision variables of original model
     changed_indices = [None]  # List to store indices changed at each threshold
-    constraint_viol = []  # List to store infeasibility results
+    abs_vio, obj_val = measuring_constraint_infeasibility(model, dv[0])
+    of = [obj_val]  # Start with the objective value of the original model
+    constraint_viol = [abs_vio]  # List to store infeasibility results
     of_dec = [model.objVal]
+
+    # Calculate total iterations
+    total_iterations = int((params['max_threshold'] - params['init_threshold']) / params['step_threshold']) + 1
+    start_time = time.time()
+    iteration = 1  # Initialize iteration counter
     # Iterate over threshold values
     threshold = params['init_threshold']
+
     while threshold <= params['max_threshold']:
         # Calculate reduced A
         A_red = matrix_sparsification(threshold, A_norm, A)
@@ -383,9 +394,10 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
             # Store infeasibility results
             of_dec.append(obj_val)
             constraint_viol.append(abs_vio)
-            print(
-                f"Threshold {np.round(threshold, 4)} has changed {len(indices)} items, "
-                f"in {model_to_use}, final objective function is: {np.round(iterative_model.objVal, 6)}")
+            if params['prints']:
+                print(
+                    f"Threshold {np.round(threshold, 4)} has changed {len(indices)} items, "
+                    f"in {model_to_use}, final objective function is: {np.round(iterative_model.objVal, 6)}")
         else:
             # Model did not find a solution
             eps.append(threshold)
@@ -394,14 +406,24 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
             changed_indices.append(np.nan)
             constraint_viol.append(np.nan)
             dv.append(np.full(len(model.getVars()), np.nan))
-            print(f"Threshold {threshold} has no feasible solution")
+            if params['prints']:
+                print(f"Threshold {threshold} has no feasible solution")
 
         # Delete the model to free up resources
         del iterative_model
 
+        # Progress bar
+        progress = iteration / total_iterations
+        bar_length = 50  # Length of the progress bar
+        progress_bar = '>' * int(bar_length * progress) + ' ' * (bar_length - int(bar_length * progress))
+        sys.stdout.write(f"\r[{progress_bar}] Iteration {iteration}/{total_iterations}")
+        sys.stdout.flush()
+
+        iteration += 1  # Increment iteration counter
+
         # Increment threshold
         threshold += params['step_threshold']
-
+    print("\n")
     return eps, of, dv, changed_indices, constraint_viol, of_dec
 
 
@@ -431,8 +453,8 @@ def visual_join_sensitivity(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual
     fig_of = go.Figure()
     name_primal_1 = 'Primal Objective Function ' + primal_sens
     name_dual_1 = 'Dual Objective Function ' + dual_sens
-    fig_of.add_trace(go.Scatter(x=eps, y=of_primal, mode='lines+markers', name=name_primal_1))
-    fig_of.add_trace(go.Scatter(x=eps, y=of_dual, mode='lines+markers', name=name_dual_1))
+    fig_of.add_trace(go.Scatter(x=eps, y=np.round(of_primal, 2), mode='lines+markers', name=name_primal_1))
+    fig_of.add_trace(go.Scatter(x=eps, y=np.round(of_dual, 2), mode='lines+markers', name=name_dual_1))
     full_title_1 = 'Objective Function Sensitivity Analysis - ' + title_n
     fig_of.update_layout(title=full_title_1, xaxis_title='Threshold',
                          yaxis_title='Objective Function Value')
@@ -481,6 +503,10 @@ def build_dual_model_from_json(data_path):
     - data_path (str): Path to the directory containing JSON files (A.json, b.json, c.json, lb.json, ub.json,
     of_sense.json, cons_senses.json).
 
+    Important:
+    - Dual is created based on the saved matrix data considering that minimization problems have only >= constraints
+    and tha maximization problems have only <= constraints.
+
     Returns:
     - dual_model (gurobipy.Model): The dual Gurobi model constructed from the provided data.
     """
@@ -507,12 +533,20 @@ def build_dual_model_from_json(data_path):
                 of_sense = data
             elif file_name == 'cons_senses.json':
                 cons_senses = data
+            elif file_name == 'lb.json':
+                primal_lb = np.array(data)
+            elif file_name == 'ub.json':
+                primal_ub = np.array(data)
 
     # Create a Gurobi model
     model = gp.Model()
     num_variables = len(cost)
-    lb = np.full(num_variables, 0)
-    ub = np.full(num_variables, np.inf)
+    if of_sense == 1:  # Minimization
+        lb = np.full(num_variables, 0)
+        ub = np.full(num_variables, np.inf)
+    else:  # Maximization
+        lb = np.full(num_variables, -np.inf)
+        ub = np.full(num_variables, 0)
 
     # Add variables with names starting from y1
     y = []
@@ -534,13 +568,18 @@ def build_dual_model_from_json(data_path):
         coefficients = A_t.data[start:end]
 
         constraint_expr: LinExpr = gp.quicksum(coefficients[j] * y[variables[j]] for j in range(len(variables)))
-        if of_sense == 1:  # minimization
+        if primal_lb[i] == -np.inf and primal_ub[i] == +np.inf:  # asymmetrical
+            model.addConstr(constraint_expr == rhs[i], name=f'constraint_{i}')
+        elif primal_lb[i] == 0 and primal_ub[i] == +np.inf:  # symmetrical
             model.addConstr(constraint_expr <= rhs[i], name=f'constraint_{i}')
-        else:  # maximization
+        elif primal_lb[i] == -np.inf and primal_ub[i] == 0:  # symmetrical
             model.addConstr(constraint_expr >= rhs[i], name=f'constraint_{i}')
 
         model.update()
-    return model
+
+    final_dual = pre_processing_model(model)
+
+    return final_dual
 
 
 def constraint_reduction(model, threshold, path):
@@ -726,6 +765,39 @@ def pre_processing_model(model):
     # Clone the original model to avoid altering it directly
     pre_processed_model = model.copy()
 
+    # Find the highest index among existing decision variables
+    existing_vars = pre_processed_model.getVars()
+
+    # Handling variable bounds
+    for var in existing_vars:
+        lower_bound = var.LB
+        upper_bound = var.UB
+
+        if lower_bound > -gp.GRB.INFINITY and lower_bound != 0:
+            # create a new constraint with this bound
+            if model.ModelSense == 1:  # Minimization --> constraints are >=
+                # Add a new constraint to the model
+                pre_processed_model.addConstr(var >= lower_bound)
+            else:  # Maximization --> constraints are <=
+                pre_processed_model.addConstr(-var <= -lower_bound)
+
+            # Set the variable to be free (unrestricted)
+            var.setAttr(gp.GRB.Attr.LB, -gp.GRB.INFINITY)
+
+        if upper_bound < gp.GRB.INFINITY and upper_bound != 0:
+            # create a new constraint with this bound
+            if model.ModelSense == 1:  # Minimization --> constraints are >=
+                # Add a new constraint to the model
+                pre_processed_model.addConstr(-var >= -upper_bound)
+            else:  # Maximization --> constraints are <=
+                pre_processed_model.addConstr(var <= upper_bound)
+
+            # Set the variable to be free (unrestricted)
+            var.setAttr(gp.GRB.Attr.UB, gp.GRB.INFINITY)
+
+    # Update model after handling variable bounds
+    pre_processed_model.update()
+
     # Iterate over each constraint in the model
     for constr in pre_processed_model.getConstrs():
         # Get the sense of the constraint
@@ -755,7 +827,7 @@ def pre_processing_model(model):
             # Flip the constraint to <=
             lhs_expr = pre_processed_model.getRow(constr)
             rhs_value = constr.RHS
-            pre_processed_model.addConstr(lhs_expr <= rhs_value, name=constr.ConstrName + "_leq")
+            pre_processed_model.addConstr(-1 * lhs_expr <= -1 * rhs_value, name=constr.ConstrName + "_leq")
             pre_processed_model.remove(constr)
 
         # For minimization problems, ensure all constraints are >=
@@ -784,7 +856,12 @@ def print_model_in_mathematical_format(model):
     # Print the constraints
     constraints = 'Subject To\n'
     for constr in model.getConstrs():
-        constraints += str(model.getRow(constr)) + ' ' + constr.Sense + ' ' + str(constr.RHS) + '\n'
+        sense = constr.Sense
+        if sense == '<':
+            sense = '≤'
+        elif sense == '>':
+            sense = '≥'
+        constraints += str(model.getRow(constr)) + ' ' + sense + ' ' + str(constr.RHS) + '\n'
 
     # Print variable bounds (if they are not default 0 and infinity)
     bounds = 'Bounds\n'
@@ -800,8 +877,7 @@ def print_model_in_mathematical_format(model):
         print(bounds)
 
 
-def quality_check(original_primal_bp, original_primal, created_primal, created_dual, created_primal_norm,
-                  tolerance=1e-6):
+def quality_check(original_primal_bp, original_primal, created_primal, created_dual, tolerance=1e-6):
     """
     Performs a quality check on the provided optimization models, including a normalized model.
 
@@ -825,18 +901,19 @@ def quality_check(original_primal_bp, original_primal, created_primal, created_d
     """
 
     # Compare objective values of the primal models
-    primal_models = [original_primal_bp, original_primal, created_primal, created_primal_norm]
+    primal_models = [original_primal_bp, original_primal, created_primal]
     for model1 in primal_models:
         for model2 in primal_models:
             if abs(model1.objVal - model2.objVal) > tolerance:
                 raise ValueError(
                     f"Quality check failed: Objective function values differ between {model1.ModelName} and {model2.ModelName}")
 
+    primal_created_models = [original_primal, created_primal]
     # Compare decision variables of the primal models
-    for i in range(len(primal_models)):
-        for j in range(i + 1, len(primal_models)):
-            model1_vars = primal_models[i].getVars()
-            model2_vars = primal_models[j].getVars()
+    for i in range(len(primal_created_models)):
+        for j in range(i + 1, len(primal_created_models)):
+            model1_vars = primal_created_models[i].getVars()
+            model2_vars = primal_created_models[j].getVars()
             for var1, var2 in zip(model1_vars, model2_vars):
                 if abs(var1.x - var2.x) > tolerance:
                     raise ValueError(
@@ -945,3 +1022,96 @@ def constraint_reduction_test(original_model, config, current_matrices_path):
         print(f"Total Absolute Violation: {total_violation}")
     else:
         print("The reduction of constraints results in an infeasible solution")
+
+
+def get_info_GAMS(directory, save_excel=False):
+    """
+    Reads GAMS optimization models in a directory and prints a summary table using tabulate.
+
+    Parameters:
+    directory: The directory containing GAMS models.
+    save_excel: Boolean, if True, saves the summary table as an Excel file.
+
+    Returns:
+    None: Prints or saves the summary table.
+    """
+    data = []
+
+    for filename in os.listdir(directory):
+        if filename.endswith('.gms') or filename.endswith('.mps'):  # Add more file extensions if needed
+            model_path = os.path.join(directory, filename)
+
+            try:
+                # Read the model
+                model = gp.read(model_path)
+                model.setParam('OutputFlag', 0)
+                model.optimize()
+
+                # Extract information
+                num_constraints = model.NumConstrs
+                num_variables = model.NumVars
+                optimal_value = model.objVal if model.status == gp.GRB.OPTIMAL else np.nan
+
+                # Append to the data list
+                data.append([filename, num_constraints, num_variables, optimal_value])
+            except Exception as e:
+                print(f"Error processing {filename}: {e}")
+
+    # Create a DataFrame
+    df = pd.DataFrame(data,
+                      columns=['Name of LP', 'Number of Constraints', 'Number of Variables', 'Optimal Solution Value'])
+
+    # Print the table using tabulate
+    print(tabulate(df, headers='keys', tablefmt='grid'))
+
+    if save_excel:
+        output_file = os.path.join(directory, 'GAMS_Models_Summary.xlsx')
+        df.to_excel(output_file, index=False)
+        print(f"Summary saved to {output_file}")
+
+
+def detailed_info_models(original_primal_bp, original_primal, created_primal, created_dual):
+    """
+    Prints detailed information and comparisons for a set of optimization models.
+
+    Parameters:
+    - original_primal_bp: The original primal model before pre-processing.
+    - original_primal: The original primal model after pre-processing.
+    - created_primal: The primal model created from matrices.
+    - created_dual: The dual model created from matrices.
+    """
+    obj_var, dec_var = compare_models(original_primal, created_primal)
+    print(f"Create model X original model: The absolute deviation of objective function value is {obj_var} "
+          f"and the average deviation of decision variable values is {dec_var}.")
+
+    if original_primal_bp.status == 2:
+        print("============ Original Model (before pre-processing) ============")
+        print("Optimal Objective Value =", original_primal_bp.objVal)
+        print("Basic Decision variables: ")
+        for var in original_primal_bp.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
+
+    if original_primal.status == 2:
+        print("============ Original Model ============")
+        print("Optimal Objective Value =", original_primal.objVal)
+        print("Basic Decision variables: ")
+        for var in original_primal.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
+
+    if created_primal.status == 2:
+        print("============ Created Model ============")
+        print("Optimal Objective Value =", created_primal.objVal)
+        print("Basic Decision variables: ")
+        for var in created_primal.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
+
+    if created_dual.status == 2:
+        print("============ Created Dual ============")
+        print("Optimal Objective Value =", created_dual.objVal)
+        print("Basic Decision variables: ")
+        for var in created_dual.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
