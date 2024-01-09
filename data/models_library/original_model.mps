@@ -23,6 +23,5 @@ RHS
 BOUNDS
  LO bnd       x1              -7
  UP bnd       x1              31
- UP bnd       x2               0
 ENDATA
 

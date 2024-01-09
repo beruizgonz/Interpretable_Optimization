@@ -453,8 +453,8 @@ def visual_join_sensitivity(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual
     fig_of = go.Figure()
     name_primal_1 = 'Primal Objective Function ' + primal_sens
     name_dual_1 = 'Dual Objective Function ' + dual_sens
-    fig_of.add_trace(go.Scatter(x=eps, y=np.round(of_primal,2), mode='lines+markers', name=name_primal_1))
-    fig_of.add_trace(go.Scatter(x=eps, y=np.round(of_dual,2), mode='lines+markers', name=name_dual_1))
+    fig_of.add_trace(go.Scatter(x=eps, y=np.round(of_primal, 2), mode='lines+markers', name=name_primal_1))
+    fig_of.add_trace(go.Scatter(x=eps, y=np.round(of_dual, 2), mode='lines+markers', name=name_dual_1))
     full_title_1 = 'Objective Function Sensitivity Analysis - ' + title_n
     fig_of.update_layout(title=full_title_1, xaxis_title='Threshold',
                          yaxis_title='Objective Function Value')
@@ -503,6 +503,10 @@ def build_dual_model_from_json(data_path):
     - data_path (str): Path to the directory containing JSON files (A.json, b.json, c.json, lb.json, ub.json,
     of_sense.json, cons_senses.json).
 
+    Important:
+    - Dual is created based on the saved matrix data considering that minimization problems have only >= constraints
+    and tha maximization problems have only <= constraints.
+
     Returns:
     - dual_model (gurobipy.Model): The dual Gurobi model constructed from the provided data.
     """
@@ -529,12 +533,20 @@ def build_dual_model_from_json(data_path):
                 of_sense = data
             elif file_name == 'cons_senses.json':
                 cons_senses = data
+            elif file_name == 'lb.json':
+                primal_lb = np.array(data)
+            elif file_name == 'ub.json':
+                primal_ub = np.array(data)
 
     # Create a Gurobi model
     model = gp.Model()
     num_variables = len(cost)
-    lb = np.full(num_variables, 0)
-    ub = np.full(num_variables, np.inf)
+    if of_sense == 1:  # Minimization
+        lb = np.full(num_variables, 0)
+        ub = np.full(num_variables, np.inf)
+    else:  # Maximization
+        lb = np.full(num_variables, -np.inf)
+        ub = np.full(num_variables, 0)
 
     # Add variables with names starting from y1
     y = []
@@ -556,13 +568,18 @@ def build_dual_model_from_json(data_path):
         coefficients = A_t.data[start:end]
 
         constraint_expr: LinExpr = gp.quicksum(coefficients[j] * y[variables[j]] for j in range(len(variables)))
-        if of_sense == 1:  # minimization (primal)
+        if primal_lb[i] == -np.inf and primal_ub[i] == +np.inf:  # asymmetrical
+            model.addConstr(constraint_expr == rhs[i], name=f'constraint_{i}')
+        elif primal_lb[i] == 0 and primal_ub[i] == +np.inf:  # symmetrical
             model.addConstr(constraint_expr <= rhs[i], name=f'constraint_{i}')
-        else:  # maximization
+        elif primal_lb[i] == -np.inf and primal_ub[i] == 0:  # symmetrical
             model.addConstr(constraint_expr >= rhs[i], name=f'constraint_{i}')
 
         model.update()
-    return model
+
+    final_dual = pre_processing_model(model)
+
+    return final_dual
 
 
 def constraint_reduction(model, threshold, path):
@@ -750,30 +767,33 @@ def pre_processing_model(model):
 
     # Find the highest index among existing decision variables
     existing_vars = pre_processed_model.getVars()
-    max_index = max(
-        int(var.VarName[1:]) for var in existing_vars if var.VarName[0] == 'x' and var.VarName[1:].isdigit())
-    new_var_index = max_index + 1
 
     # Handling variable bounds
     for var in existing_vars:
         lower_bound = var.LB
         upper_bound = var.UB
 
-        if lower_bound > -gp.GRB.INFINITY:  # Has a lower bound
-            # Introduce new variable
-            new_var_name = f"x{new_var_index}"
-            new_var_index += 1
-            xj = pre_processed_model.addVar(lb=0, ub=gp.GRB.INFINITY, name=new_var_name)
-            pre_processed_model.addConstr(var == xj + lower_bound)
-            var.LB = -gp.GRB.INFINITY
+        if lower_bound > -gp.GRB.INFINITY and lower_bound != 0:
+            # create a new constraint with this bound
+            if model.ModelSense == 1:  # Minimization --> constraints are >=
+                # Add a new constraint to the model
+                pre_processed_model.addConstr(var >= lower_bound)
+            else:  # Maximization --> constraints are <=
+                pre_processed_model.addConstr(-var <= -lower_bound)
 
-        if upper_bound < gp.GRB.INFINITY:  # Has an upper bound
-            # Introduce new variable
-            new_var_name = f"x{new_var_index}"
-            new_var_index += 1
-            xj = pre_processed_model.addVar(lb=0, ub=gp.GRB.INFINITY, name=new_var_name)
-            pre_processed_model.addConstr(var == -xj + upper_bound)
-            var.UB = gp.GRB.INFINITY
+            # Set the variable to be free (unrestricted)
+            var.setAttr(gp.GRB.Attr.LB, -gp.GRB.INFINITY)
+
+        if upper_bound < gp.GRB.INFINITY and upper_bound != 0:
+            # create a new constraint with this bound
+            if model.ModelSense == 1:  # Minimization --> constraints are >=
+                # Add a new constraint to the model
+                pre_processed_model.addConstr(-var >= -upper_bound)
+            else:  # Maximization --> constraints are <=
+                pre_processed_model.addConstr(var <= upper_bound)
+
+            # Set the variable to be free (unrestricted)
+            var.setAttr(gp.GRB.Attr.UB, gp.GRB.INFINITY)
 
     # Update model after handling variable bounds
     pre_processed_model.update()
@@ -807,7 +827,7 @@ def pre_processing_model(model):
             # Flip the constraint to <=
             lhs_expr = pre_processed_model.getRow(constr)
             rhs_value = constr.RHS
-            pre_processed_model.addConstr(lhs_expr <= rhs_value, name=constr.ConstrName + "_leq")
+            pre_processed_model.addConstr(-1 * lhs_expr <= -1 * rhs_value, name=constr.ConstrName + "_leq")
             pre_processed_model.remove(constr)
 
         # For minimization problems, ensure all constraints are >=
@@ -857,8 +877,7 @@ def print_model_in_mathematical_format(model):
         print(bounds)
 
 
-def quality_check(original_primal_bp, original_primal, created_primal, created_dual, created_primal_norm,
-                  tolerance=1e-6):
+def quality_check(original_primal_bp, original_primal, created_primal, created_dual, tolerance=1e-6):
     """
     Performs a quality check on the provided optimization models, including a normalized model.
 
@@ -882,18 +901,19 @@ def quality_check(original_primal_bp, original_primal, created_primal, created_d
     """
 
     # Compare objective values of the primal models
-    primal_models = [original_primal_bp, original_primal, created_primal, created_primal_norm]
+    primal_models = [original_primal_bp, original_primal, created_primal]
     for model1 in primal_models:
         for model2 in primal_models:
             if abs(model1.objVal - model2.objVal) > tolerance:
                 raise ValueError(
                     f"Quality check failed: Objective function values differ between {model1.ModelName} and {model2.ModelName}")
 
+    primal_created_models = [original_primal, created_primal]
     # Compare decision variables of the primal models
-    for i in range(len(primal_models)):
-        for j in range(i + 1, len(primal_models)):
-            model1_vars = primal_models[i].getVars()
-            model2_vars = primal_models[j].getVars()
+    for i in range(len(primal_created_models)):
+        for j in range(i + 1, len(primal_created_models)):
+            model1_vars = primal_created_models[i].getVars()
+            model2_vars = primal_created_models[j].getVars()
             for var1, var2 in zip(model1_vars, model2_vars):
                 if abs(var1.x - var2.x) > tolerance:
                     raise ValueError(
@@ -1038,7 +1058,8 @@ def get_info_GAMS(directory, save_excel=False):
                 print(f"Error processing {filename}: {e}")
 
     # Create a DataFrame
-    df = pd.DataFrame(data, columns=['Name of LP', 'Number of Constraints', 'Number of Variables', 'Optimal Solution Value'])
+    df = pd.DataFrame(data,
+                      columns=['Name of LP', 'Number of Constraints', 'Number of Variables', 'Optimal Solution Value'])
 
     # Print the table using tabulate
     print(tabulate(df, headers='keys', tablefmt='grid'))

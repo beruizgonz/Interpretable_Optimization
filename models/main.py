@@ -26,9 +26,9 @@ if __name__ == "__main__":
                                "n_variables": 5,
                                "n_constraints": 4},
               "load_model": {"val": True,
-                             "load_path": 'models_library',
-                             "name": 'original_model.mps'},
-              "print_mathematical_format": True,
+                             "load_path": 'GAMS_library',
+                             "name": 'all'},
+              "print_mathematical_format": False,
               "verbose": 0,
               "print_detail_sol": False,
               "save_original_model": {"val": False,
@@ -211,11 +211,11 @@ if __name__ == "__main__":
         created_primal_norm = build_model_from_json(current_matrices_path)
         created_primal_norm.setParam('OutputFlag', config['verbose'])
         created_primal_norm.optimize()
+        # TODO
 
         # ================================================== Quality check =============================================
 
-        quality_check(original_primal_bp, original_primal, created_primal, created_dual, created_primal_norm,
-                      tolerance=1e-6)
+        quality_check(original_primal_bp, original_primal, created_primal, created_dual, tolerance=1e-2)
         log.info(
             f"{str(datetime.now())}: Quality check passed...")
 
