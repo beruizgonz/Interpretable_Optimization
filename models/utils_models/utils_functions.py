@@ -453,8 +453,8 @@ def visual_join_sensitivity(eps, of_primal, dv_primal, cviol_p, of_dual, dv_dual
     fig_of = go.Figure()
     name_primal_1 = 'Primal Objective Function ' + primal_sens
     name_dual_1 = 'Dual Objective Function ' + dual_sens
-    fig_of.add_trace(go.Scatter(x=eps, y=of_primal, mode='lines+markers', name=name_primal_1))
-    fig_of.add_trace(go.Scatter(x=eps, y=of_dual, mode='lines+markers', name=name_dual_1))
+    fig_of.add_trace(go.Scatter(x=eps, y=np.round(of_primal,2), mode='lines+markers', name=name_primal_1))
+    fig_of.add_trace(go.Scatter(x=eps, y=np.round(of_dual,2), mode='lines+markers', name=name_dual_1))
     full_title_1 = 'Objective Function Sensitivity Analysis - ' + title_n
     fig_of.update_layout(title=full_title_1, xaxis_title='Threshold',
                          yaxis_title='Objective Function Value')
@@ -836,7 +836,12 @@ def print_model_in_mathematical_format(model):
     # Print the constraints
     constraints = 'Subject To\n'
     for constr in model.getConstrs():
-        constraints += str(model.getRow(constr)) + ' ' + constr.Sense + ' ' + str(constr.RHS) + '\n'
+        sense = constr.Sense
+        if sense == '<':
+            sense = '≤'
+        elif sense == '>':
+            sense = '≥'
+        constraints += str(model.getRow(constr)) + ' ' + sense + ' ' + str(constr.RHS) + '\n'
 
     # Print variable bounds (if they are not default 0 and infinity)
     bounds = 'Bounds\n'
