@@ -866,15 +866,13 @@ def print_model_in_mathematical_format(model):
     # Print variable bounds (if they are not default 0 and infinity)
     bounds = 'Bounds\n'
     for var in model.getVars():
-        lb = '' if var.LB == 0 else f'{var.LB} <= '
-        ub = '' if var.UB == gp.GRB.INFINITY else f' <= {var.UB}'
-        if lb != '' or ub != '':
-            bounds += lb + var.VarName + ub + '\n'
+        lb = '-inf' if var.LB <= -gp.GRB.INFINITY else str(var.LB)
+        ub = '+inf' if var.UB >= gp.GRB.INFINITY else str(var.UB)
+        bounds += f'{lb} <= {var.VarName} <= {ub}\n'
 
     print(objective)
     print(constraints)
-    if bounds.strip() != 'Bounds':
-        print(bounds)
+    print(bounds)
 
 
 def quality_check(original_primal_bp, original_primal, created_primal, created_dual, tolerance=1e-6):
@@ -1115,3 +1113,59 @@ def detailed_info_models(original_primal_bp, original_primal, created_primal, cr
         for var in created_dual.getVars():
             if var.x != 0:
                 print(f"{var.VarName} =", var.x)
+
+
+def rhs_sensitivity(model):
+    """
+    Perform Right-Hand Side (RHS) sensitivity analysis on a Gurobi model.
+
+    This function takes a Gurobi model as input, which is assumed to have been solved to optimality.
+    It returns two vectors: 'allowable_decrease' and 'allowable_increase', which represent the amount by which
+    the RHS of each constraint can be decreased or increased without altering the optimal basis of the solution.
+
+    Args:
+    model (gurobipy.Model): The Gurobi model for which RHS sensitivity analysis is to be performed.
+
+    Returns:
+    Tuple[List[float], List[float]]: Two lists containing the allowable decreases and increases in the RHS of each constraint.
+    """
+
+    allowable_decrease = []
+    allowable_increase = []
+
+    for constraint in model.getConstrs():
+        # Append the allowable decrease and increase for each constraint
+        allowable_decrease.append(constraint.SARHSLow)
+        allowable_increase.append(constraint.SARHSUp)
+
+    return allowable_decrease, allowable_increase
+
+
+def cost_function_sensitivity(model):
+    """
+    Perform cost coefficient sensitivity analysis on a linear programming model.
+
+    Args:
+    model: The linear programming model, already solved to optimality.
+
+    Returns:
+    A dictionary containing the allowable increase and decrease for each variable's cost coefficient.
+    """
+
+    allowable_decrease = []
+    allowable_increase = []
+
+    # Iterate over all decision variables in the model
+    for var in model.getVars():
+        reduced_cost = var.RC
+
+        if model.ModelSense == 1:
+            # For minimization problems
+            allowable_decrease.append(float('inf') if reduced_cost <= 0 else reduced_cost)
+            allowable_increase.append(float('inf') if reduced_cost >= 0 else -reduced_cost)
+        else:
+            # For maximization problems
+            allowable_decrease.append(float('inf') if reduced_cost >= 0 else -reduced_cost)
+            allowable_increase.append(float('inf') if reduced_cost <= 0 else reduced_cost)
+
+    return allowable_decrease, allowable_increase

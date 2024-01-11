@@ -11,7 +11,7 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \
     print_model_in_mathematical_format, visual_join_sensitivity, \
     measuring_constraint_infeasibility, quality_check, sparsification_test, constraint_reduction_test, get_info_GAMS, \
-    detailed_info_models
+    detailed_info_models, rhs_sensitivity, cost_function_sensitivity
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -27,13 +27,14 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'GAMS_library',
-                             "name": 'all'},
-              "print_mathematical_format": False,
+                             "name": 'TRNSPORT.mps'},
+              "print_mathematical_format": True,
               "verbose": 0,
-              "print_detail_sol": False,
+              "print_detail_sol": True,
               "save_original_model": {"val": False,
                                       "save_name": 'testing_transp.mps',
                                       "save_path": 'models_library'},
+              "rhs_sensitivity": True,
               "test_sparsification": {"val": False,
                                       "threshold": 0.13},
               "test_constraint_red": {"val": False,
@@ -219,6 +220,13 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Quality check passed...")
 
+        # ================================================ Test rhs sensitivity ========================================
+        if config['rhs_sensitivity']:
+            log.info(
+                f"{str(datetime.now())}: Right-hand-side sensitivity analysis:")
+            rhs_dec, rhs_inc = rhs_sensitivity(original_primal_bp)
+
+            cv_dec, cv_inc = cost_function_sensitivity(original_primal_bp)
         # ================================================ Test Sparsification =========================================
         if config['test_sparsification']['val']:
             log.info(

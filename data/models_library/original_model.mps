@@ -1,27 +1,24 @@
-* LP in MPS format
-NAME          MyLP
+* LP Problem in MPS Format
+NAME          ExampleLP
 ROWS
  N  obj
- E  c1
- L  c2
+ L  c1
+ E  c2
  G  c3
- G  c4
 COLUMNS
-    x1        obj               1
-    x1        c1                2
-    x1        c2               -1
-    x1        c3               -3
-    x1        c4                1
-    x2        c1               -5
-    x2        c2               -1
-    x2        c3                2
-    x3        obj               1
-    x3        c4               -1
+    x1        c1                1
+    x1        c2                1
+    x2        obj               1
+    x2        c1                1
+    x2        c3                1
+    x3        c2               -1
+    x3        c3                2
 RHS
-    rhs       c1                4
-    rhs       c4                1
+    rhs       c1                5
+    rhs       c2                4
+    rhs       c3                7
 BOUNDS
- LO bnd       x1              -7
- UP bnd       x1              31
+ LO bnd       x1               0
+ UP bnd       x2               7
+ FR bnd       x3
 ENDATA
-
