@@ -23,18 +23,19 @@ if __name__ == "__main__":
     config = {"get_only_GAMS_info": {"val": False,
                                      "save_xls": False},
               "create_model": {"val": False,
-                               "n_variables": 5,
+                               "n_variables": 50000,
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'GAMS_library',
-                             "name": 'TRNSPORT.mps'},
-              "print_mathematical_format": True,
+                             "name": 'all'},
+              "print_mathematical_format": False,
               "verbose": 0,
-              "print_detail_sol": True,
+              "print_detail_sol": False,
               "save_original_model": {"val": False,
                                       "save_name": 'testing_transp.mps',
                                       "save_path": 'models_library'},
-              "rhs_sensitivity": True,
+              "rhs_sensitivity": False,
+              "cost_sensitivity": False,
               "test_sparsification": {"val": False,
                                       "threshold": 0.13},
               "test_constraint_red": {"val": False,
@@ -220,12 +221,16 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Quality check passed...")
 
-        # ================================================ Test rhs sensitivity ========================================
+        # ============================================ rhs sensitivity analysis ========================================
         if config['rhs_sensitivity']:
             log.info(
                 f"{str(datetime.now())}: Right-hand-side sensitivity analysis:")
             rhs_dec, rhs_inc = rhs_sensitivity(original_primal_bp)
 
+        # ======================================== cost vector sensitivity analysis ====================================
+        if config['cost_sensitivity']:
+            log.info(
+                f"{str(datetime.now())}: Cost vector sensitivity analysis:")
             cv_dec, cv_inc = cost_function_sensitivity(original_primal_bp)
         # ================================================ Test Sparsification =========================================
         if config['test_sparsification']['val']:
@@ -238,10 +243,6 @@ if __name__ == "__main__":
             log.info(
                 f"{str(datetime.now())}: Results of the constraint reduction test:")
             constraint_reduction_test(original_primal, config, current_matrices_path)
-
-        # ============================================ Test variable reduction =========================================
-
-        # TODO
 
         # =================== Sensitivity analysis on matrix sparsification for different thresholds ===================
         if config['sparsification_sa']['val']:
