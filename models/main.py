@@ -3,7 +3,6 @@ import gurobipy as gp
 import logging
 import sys
 from collections import defaultdict
-import numpy as np
 from datetime import datetime
 from Interpretable_Optimization.models.utils_models.utils_functions import create_original_model, get_model_matrices, \
     save_json, build_model_from_json, compare_models, normalize_features, matrix_sparsification, \
@@ -12,6 +11,8 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     print_model_in_mathematical_format, visual_join_sensitivity, \
     measuring_constraint_infeasibility, quality_check, sparsification_test, constraint_reduction_test, get_info_GAMS, \
     detailed_info_models, rhs_sensitivity, cost_function_sensitivity
+
+from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -27,8 +28,8 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'GAMS_library',
-                             "name": 'all'},
-              "print_mathematical_format": False,
+                             "name": 'TRNSPORT.mps'},
+              "print_mathematical_format": True,
               "verbose": 0,
               "print_detail_sol": False,
               "save_original_model": {"val": False,
@@ -41,8 +42,8 @@ if __name__ == "__main__":
               "test_constraint_red": {"val": False,
                                       "threshold": 0.8},
               "create_presolved": False,
-              "sparsification_sa": {"val": False,
-                                    "plots": False,
+              "sparsification_sa": {"val": True,
+                                    "plots": True,
                                     "prints": False,
                                     "max_threshold": 0.3,
                                     "init_threshold": 0.01,
@@ -157,6 +158,9 @@ if __name__ == "__main__":
         created_dual = build_dual_model_from_json(current_matrices_path)
         A_dual, b_dual, c_dual, lb_dual, ub_dual, of_sense_dual, cons_senses_dual = get_model_matrices(created_dual)
 
+        # =========================================== Getting row activities ===========================================
+        SUPP, INF, SUP = get_row_activities(original_primal_bp)
+
         # ====================================== Printing model in mathematical format =================================
         if config['print_mathematical_format']:
             log.info(
@@ -213,7 +217,6 @@ if __name__ == "__main__":
         created_primal_norm = build_model_from_json(current_matrices_path)
         created_primal_norm.setParam('OutputFlag', config['verbose'])
         created_primal_norm.optimize()
-        # TODO
 
         # ================================================== Quality check =============================================
 
