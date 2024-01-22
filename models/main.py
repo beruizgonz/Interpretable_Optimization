@@ -12,7 +12,8 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     measuring_constraint_infeasibility, quality_check, sparsification_test, constraint_reduction_test, get_info_GAMS, \
     detailed_info_models, rhs_sensitivity, cost_function_sensitivity
 
-from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities
+from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
+    feedback_individual_constraints
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -28,7 +29,7 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'GAMS_library',
-                             "name": 'TRNSPORT.mps'},
+                             "name": 'all'},
               "print_mathematical_format": True,
               "verbose": 0,
               "print_detail_sol": False,
@@ -160,6 +161,8 @@ if __name__ == "__main__":
 
         # =========================================== Getting row activities ===========================================
         SUPP, INF, SUP = get_row_activities(original_primal_bp)
+
+        feedback_matrix = feedback_individual_constraints(original_primal_bp)
 
         # ====================================== Printing model in mathematical format =================================
         if config['print_mathematical_format']:
