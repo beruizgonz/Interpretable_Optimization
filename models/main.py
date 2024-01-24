@@ -13,7 +13,7 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     detailed_info_models, rhs_sensitivity, cost_function_sensitivity
 
 from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
-    feedback_individual_constraints
+    feedback_individual_constraints, small_coefficient_reduction
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -29,10 +29,10 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'GAMS_library',
-                             "name": 'all'},
+                             "name": 'TRNSPORT.mps'},
               "print_mathematical_format": True,
               "verbose": 0,
-              "print_detail_sol": False,
+              "print_detail_sol": True,
               "save_original_model": {"val": False,
                                       "save_name": 'testing_transp.mps',
                                       "save_path": 'models_library'},
@@ -43,8 +43,8 @@ if __name__ == "__main__":
               "test_constraint_red": {"val": False,
                                       "threshold": 0.8},
               "create_presolved": False,
-              "sparsification_sa": {"val": True,
-                                    "plots": True,
+              "sparsification_sa": {"val": False,
+                                    "plots": False,
                                     "prints": False,
                                     "max_threshold": 0.3,
                                     "init_threshold": 0.01,
@@ -113,6 +113,7 @@ if __name__ == "__main__":
     def nested_dict():
         return defaultdict(nested_dict)
 
+
     sparsification_results = defaultdict(nested_dict)
     total_models = len(model_files)
 
@@ -157,12 +158,7 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Creating dual model by loading A, b, c, lb and ub...")
         created_dual = build_dual_model_from_json(current_matrices_path)
-        A_dual, b_dual, c_dual, lb_dual, ub_dual, of_sense_dual, cons_senses_dual = get_model_matrices(created_dual)
-
-        # =========================================== Getting row activities ===========================================
-        SUPP, INF, SUP = get_row_activities(original_primal_bp)
-
-        feedback_matrix = feedback_individual_constraints(original_primal_bp)
+        A_dual, b_dual, c_dual, lb_dual, ub_dual, of_sense_dual, cons_senses_dual = get_modeNol_matrices(created_dual)
 
         # ====================================== Printing model in mathematical format =================================
         if config['print_mathematical_format']:
@@ -227,6 +223,13 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Quality check passed...")
 
+        # =========================================== Presolve like operation ==========================================
+        SUPP, INF, SUP = get_row_activities(original_primal_bp)
+
+        feedback_matrix = feedback_individual_constraints(original_primal_bp)
+
+        new_model, changes = small_coefficient_reduction(original_primal_bp)
+
         # ============================================ rhs sensitivity analysis ========================================
         if config['rhs_sensitivity']:
             log.info(
@@ -238,6 +241,7 @@ if __name__ == "__main__":
             log.info(
                 f"{str(datetime.now())}: Cost vector sensitivity analysis:")
             cv_dec, cv_inc = cost_function_sensitivity(original_primal_bp)
+
         # ================================================ Test Sparsification =========================================
         if config['test_sparsification']['val']:
             log.info(

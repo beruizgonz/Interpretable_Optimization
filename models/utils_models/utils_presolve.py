@@ -1,5 +1,6 @@
 import numpy as np
-import gurobipy as gp
+from pyomo.environ import *
+
 
 def get_row_activities(model):
     """
@@ -107,3 +108,62 @@ def feedback_individual_constraints(model, feasibility_tolerance=1e-6, infinity=
         feedback_matrix.append([i, feedback])
 
     return np.array(feedback_matrix)
+
+
+def small_coefficient_reduction(old_model, feasibility_tolerance=1e-6):
+    """
+    Perform pre-solve reduction on small coefficients in the constraint matrix of a Gurobi model.
+
+    The function applies three reduction cases on the coefficients:
+    1. Negligibly Small Coefficient: Coefficients smaller than 1e-3 meeting a specific product criterion are set to zero
+     after adjusting the RHS.
+    2. Cumulative Small Coefficient Reduction: Starting with the smallest coefficient in a constraint, coefficients are
+    set to zero as long as the cumulative sum of changes remains below 10e-1 * feasibility_tolerance.
+    3. Extremely Small Coefficient: Coefficients smaller than 1e-10 are directly set to zero.
+
+    Parameters:
+    old_model (gurobipy.Model): The Gurobi model to be modified.
+
+    Returns:
+    tuple: A tuple containing the updated model and a dictionary of changes.
+           The dictionary keys are tuples (i, j) indicating the row and column indices,
+           and values are dictionaries with keys 'old_value', 'new_value', and 'description'.
+    """
+
+    model = old_model.copy()
+    changes = {}  # Track changes made to coefficients
+
+    # Iterate through the constraints and variables to apply reductions
+    for constr in model.getConstrs():
+        i = constr.ConstrName
+        expr = model.getRow(constr) # Get variables and coefficients
+        cumulative_modifications = 0  # Track cumulative sum of modifications for Case 2
+
+        num_terms = expr.size()
+
+        # Iterate over each term in the linear expression
+        for k in range(num_terms):
+            var = expr.getVar(k)
+            coeff = expr.getCoeff(k)
+            j = var.VarName
+
+            # Case 1: Extremely Small Coefficient
+            if abs(coeff) < 1e-10:
+                changes[(i, j)] = {'old_value': coeff, 'new_value': 0, 'description': 'Extremely Small Coefficient'}
+                # Set coefficient to zero in the model
+                model.chgCoeff(constr, var, 0)
+                cumulative_modifications += abs(coeff) * (var.UB - var.LB)
+
+            # Case 2: Negligibly Small Coefficient
+            elif abs(coeff) < 1e-3:
+                product = abs(coeff) * (var.UB - var.LB) * abs(len(expr.getVars()))
+                if product < 1e-2 * feasibility_tolerance:
+                    changes[(i, j)] = {'old_value': coeff, 'new_value': 0,
+                                       'description': 'Negligibly Small Coefficient'}
+                    # Update RHS and set coefficient to zero in the model
+                    constr.setAttr("RHS", constr.RHS - coeff * var.LB)
+                    model.chgCoeff(constr, var, 0)
+                    cumulative_modifications += abs(coeff) * (var.UB - var.LB)
+
+    model.update()  # Update the model with the changes
+    return model, changes
