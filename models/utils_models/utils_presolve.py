@@ -1,5 +1,5 @@
 import numpy as np
-from pyomo.environ import *
+from gurobipy import GRB
 
 
 def get_row_activities(model):
@@ -136,7 +136,7 @@ def small_coefficient_reduction(old_model, feasibility_tolerance=1e-6):
     # Iterate through the constraints and variables to apply reductions
     for constr in model.getConstrs():
         i = constr.ConstrName
-        expr = model.getRow(constr) # Get variables and coefficients
+        expr = model.getRow(constr)  # Get variables and coefficients
         cumulative_modifications = 0  # Track cumulative sum of modifications for Case 2
 
         num_terms = expr.size()
@@ -167,3 +167,155 @@ def small_coefficient_reduction(old_model, feasibility_tolerance=1e-6):
 
     model.update()  # Update the model with the changes
     return model, changes
+
+
+def eliminate_zero_rows(model):
+    """
+    Eliminate zero rows from a Gurobi optimization model.
+
+    This function first creates a copy of the given model. It then transforms all
+    '>=' constraints to '<=' constraints. The function checks each constraint to
+    identify zero rows, i.e., rows where all coefficients are zero.
+
+    Based on the right-hand side of these zero rows, the function classifies
+    each constraint as:
+    - 'Redundant' if the right-hand side is non-negative
+    - 'Infeasible' if the right-hand side is negative
+    - 'Valid' for all other constraints
+
+    Parameters:
+    - model: The Gurobi model to be processed.
+
+    Returns:
+    - A dictionary where each key is a constraint name, and the value is
+      a string indicating whether the constraint is 'Redundant', 'Infeasible', or 'Valid'.
+    """
+    # Step 1: Copy the model
+    model_copy = model.copy()
+
+    # Step 2: Transform all '>=' constraints to '<=' in the copied model
+    for constr in model_copy.getConstrs():
+        if constr.Sense == '>':
+            constr.Sense = '<='
+            constr.RHS = -constr.RHS
+            for i, var in enumerate(model_copy.getVars()):
+                coeff = model_copy.getCoeff(constr, var)
+                model_copy.chgCoeff(constr, var, -coeff)
+
+    model_copy.update()
+
+    # Step 3 & 4: Identify zero rows and classify constraints
+    feedback = {}
+    for constr in model_copy.getConstrs():
+        is_zero_row = all(model_copy.getCoeff(constr, var) == 0 for var in model_copy.getVars())
+
+        if is_zero_row:
+            if constr.RHS >= 0:
+                feedback[constr.ConstrName] = 'Redundant'
+            else:
+                feedback[constr.ConstrName] = 'Infeasible'
+        else:
+            feedback[constr.ConstrName] = 'Valid'
+
+    return feedback
+
+
+def eliminate_zero_columns(model):
+    """
+    This function evaluates each decision variable in a given Gurobi model to identify redundant or unbounded variables.
+    It checks if a column in the coefficient matrix A is empty (all coefficients are zero).
+    Depending on the cost coefficient c_j, the variable is classified as redundant, unbounded, or valid.
+
+    Args:
+    model (gurobipy.Model): The Gurobi model to evaluate.
+
+    Returns:
+    dict: A dictionary where keys are variable names and values are feedback strings ('Redundant', 'Unbounded', 'Valid').
+    """
+
+    feedback = {}
+    for var in model.getVars():
+        # Extract the column corresponding to the variable
+        col = model.getCol(var)
+
+        # Check if all coefficients in the column are zero
+        if all(coef == 0 for coef in col):
+            c_j = var.obj
+
+            # Classify based on c_j value
+            if c_j >= 0:
+                feedback[var.varName] = 'Redundant'
+            else:
+                feedback[var.varName] = 'Unbounded'
+        else:
+            feedback[var.varName] = 'Valid'
+
+    return feedback
+
+
+def eliminate_singleton_equalities(model):
+    """
+    This function processes a Gurobi model to eliminate singleton equality constraints.
+    It simplifies the model by fixing variables and updating the model accordingly.
+    If a negative fixed value for a variable is found, the model is declared infeasible.
+
+    Args:
+    model (gurobipy.Model): The Gurobi model to process.
+
+    Returns:
+    gurobipy.Model: The updated Gurobi model after eliminating singleton equalities.
+    """
+
+    # Copy the model to avoid modifying the original
+    copied_model = model.copy()
+
+    # Variable to track if we found a singleton in the current iteration
+    found_singleton = True
+
+    while found_singleton:
+        found_singleton = False
+
+        # Iterate over the constraints
+        for constr in copied_model.getConstrs():
+            # Check if the constraint is an equality constraint
+            if constr.Sense == GRB.EQUAL:
+                # Extract the row of this constraint
+                row = copied_model.getRow(constr)
+                non_zero_coeffs = np.nonzero(row.getA())[0]
+
+                # Check if it's a singleton row
+                if len(non_zero_coeffs) == 1:
+                    found_singleton = True
+                    k = non_zero_coeffs[0]
+                    var_k = row.getVar(k)
+                    a_ik = row.getCoeff(k)
+                    b_i = constr.RHS
+
+                    # Calculate the fixed value for x_k
+                    x_k = b_i / a_ik
+
+                    if x_k >= 0:
+                        # Update b for all constraints
+                        for other_constr in copied_model.getConstrs():
+                            other_row = copied_model.getRow(other_constr)
+                            other_row.addTerms(-x_k, var_k)
+                            copied_model.chgCoeff(other_constr, var_k, 0)
+
+                        # Update objective constant if necessary
+                        c_k = var_k.Obj
+                        if c_k != 0:
+                            copied_model.setObjective(copied_model.getObjective() - c_k * x_k)
+
+                        # Remove the i-th row and k-th column
+                        copied_model.remove(constr)
+                        copied_model.remove(var_k)
+                    else:
+                        # Problem is infeasible
+                        return "Warning: Model is infeasible due to a negative singleton."
+
+                    # Break from the for loop as the model has changed
+                    break
+
+    # Update the model
+    copied_model.update()
+    return copied_model

@@ -1169,3 +1169,28 @@ def cost_function_sensitivity(model):
             allowable_increase.append(float('inf') if reduced_cost <= 0 else reduced_cost)
 
     return allowable_decrease, allowable_increase
+
+
+def dict2json(dictionary, file_path):
+    """
+    Converts a dictionary to a JSON file, handling NumPy ndarray objects.
+    Saves the JSON to the specified file path and logs the action.
+
+    Parameters:
+        dictionary (dict): The dictionary to be converted and saved.
+        file_path (str): The path to save the JSON file.
+    """
+
+    # Function to convert ndarrays to lists
+    def convert_ndarray(obj):
+        if isinstance(obj, np.ndarray):
+            return obj.tolist()
+        raise TypeError("Object of type '%s' is not JSON serializable" % type(obj).__name__)
+
+    # Convert and save as JSON
+    with open(file_path, 'w') as file:
+        json.dump(dictionary, file, default=convert_ndarray, indent=4)
+
+
+
+

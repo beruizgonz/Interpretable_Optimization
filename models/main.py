@@ -1,3 +1,4 @@
+import json
 import os
 import gurobipy as gp
 import logging
@@ -10,7 +11,7 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \
     print_model_in_mathematical_format, visual_join_sensitivity, \
     measuring_constraint_infeasibility, quality_check, sparsification_test, constraint_reduction_test, get_info_GAMS, \
-    detailed_info_models, rhs_sensitivity, cost_function_sensitivity
+    detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json
 
 from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
     feedback_individual_constraints, small_coefficient_reduction
@@ -29,21 +30,21 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'GAMS_library',
-                             "name": 'TRNSPORT.mps'},
-              "print_mathematical_format": True,
+                             "name": 'all'},
+              "print_mathematical_format": False,
               "verbose": 0,
-              "print_detail_sol": True,
+              "print_detail_sol": False,
               "save_original_model": {"val": False,
                                       "save_name": 'testing_transp.mps',
                                       "save_path": 'models_library'},
               "rhs_sensitivity": False,
               "cost_sensitivity": False,
+              "presolve_operations": False,
               "test_sparsification": {"val": False,
                                       "threshold": 0.13},
               "test_constraint_red": {"val": False,
                                       "threshold": 0.8},
-              "create_presolved": False,
-              "sparsification_sa": {"val": False,
+              "sparsification_sa": {"val": True,
                                     "plots": False,
                                     "prints": False,
                                     "max_threshold": 0.3,
@@ -158,7 +159,7 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Creating dual model by loading A, b, c, lb and ub...")
         created_dual = build_dual_model_from_json(current_matrices_path)
-        A_dual, b_dual, c_dual, lb_dual, ub_dual, of_sense_dual, cons_senses_dual = get_modeNol_matrices(created_dual)
+        A_dual, b_dual, c_dual, lb_dual, ub_dual, of_sense_dual, cons_senses_dual = get_model_matrices(created_dual)
 
         # ====================================== Printing model in mathematical format =================================
         if config['print_mathematical_format']:
@@ -224,11 +225,15 @@ if __name__ == "__main__":
             f"{str(datetime.now())}: Quality check passed...")
 
         # =========================================== Presolve like operation ==========================================
-        SUPP, INF, SUP = get_row_activities(original_primal_bp)
+        if config['presolve_operations']:
+            log.info(
+                f"{str(datetime.now())}: Presolve like operations")
 
-        feedback_matrix = feedback_individual_constraints(original_primal_bp)
+            SUPP, INF, SUP = get_row_activities(original_primal_bp)
 
-        new_model, changes = small_coefficient_reduction(original_primal_bp)
+            feedback_matrix = feedback_individual_constraints(original_primal_bp)
+
+            new_model, changes = small_coefficient_reduction(original_primal_bp)
 
         # ============================================ rhs sensitivity analysis ========================================
         if config['rhs_sensitivity']:
@@ -324,3 +329,6 @@ if __name__ == "__main__":
         # ============================================== Clearing models  ==============================================
         # Delete model instances
         del original_primal_bp, original_primal, created_primal, created_dual
+
+    # Saving the dictionary
+    dict2json(sparsification_results, 'sparsification_results.json')
