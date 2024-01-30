@@ -14,7 +14,7 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json
 
 from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
-    feedback_individual_constraints, small_coefficient_reduction
+    feedback_individual_constraints, small_coefficient_reduction, eliminate_zero_columns, eliminate_singleton_equalities
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -29,17 +29,17 @@ if __name__ == "__main__":
                                "n_variables": 50000,
                                "n_constraints": 4},
               "load_model": {"val": True,
-                             "load_path": 'GAMS_library',
-                             "name": 'all'},
+                             "load_path": 'models_library',
+                             "name": 'transp_singleton.mps'},
               "print_mathematical_format": False,
               "verbose": 0,
               "print_detail_sol": False,
               "save_original_model": {"val": False,
-                                      "save_name": 'testing_transp.mps',
+                                      "save_name": 'transp_singleton.mps',
                                       "save_path": 'models_library'},
               "rhs_sensitivity": False,
               "cost_sensitivity": False,
-              "presolve_operations": False,
+              "presolve_operations": True,
               "test_sparsification": {"val": False,
                                       "threshold": 0.13},
               "test_constraint_red": {"val": False,
@@ -228,7 +228,8 @@ if __name__ == "__main__":
         if config['presolve_operations']:
             log.info(
                 f"{str(datetime.now())}: Presolve like operations")
-
+            model, solution = eliminate_singleton_equalities(original_primal_bp, current_matrices_path)
+            fd_var = eliminate_zero_columns(original_primal_bp)
             SUPP, INF, SUP = get_row_activities(original_primal_bp)
 
             feedback_matrix = feedback_individual_constraints(original_primal_bp)

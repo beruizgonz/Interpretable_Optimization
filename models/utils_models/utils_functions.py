@@ -99,7 +99,7 @@ def get_model_matrices(model):
     return A, b, c, lb, ub, of_sense, cons_senses
 
 
-def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path):
+def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path, variable_names=None):
     """
     Save matrices and data structures as JSON files, including the sense of optimization and constraints.
 
@@ -112,10 +112,15 @@ def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path):
     - of_sense (int): Sense of optimization (1 for minimize, -1 for maximize).
     - cons_senses (list): List of senses for each constraint.
     - save_path (str): Path to save JSON files.
+    - variable_names (list, optional): Names of the decision variables. If None, defaults to x1, x2, ...
 
     The data includes the constraint matrix A, vectors b, c, lower bounds lb, upper bounds ub,
     the sense of optimization, and the senses of each constraint.
     """
+
+    # Generate default variable names if not provided
+    if variable_names is None:
+        variable_names = [f'x{i+1}' for i in range(A.shape[1])]
 
     # Create a dictionary to store the data
     data_dict = {
@@ -125,7 +130,8 @@ def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path):
         'lb': lb,
         'ub': ub,
         'of_sense': of_sense,
-        'cons_senses': cons_senses
+        'cons_senses': cons_senses,
+        'variable_names': variable_names
     }
 
     # Ensure the save path exists
@@ -135,17 +141,13 @@ def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path):
     for name, data in data_dict.items():
         file_name = os.path.join(save_path, f'{name}.json')
 
-        if isinstance(data, list):
-            with open(file_name, 'w') as file:
-                json.dump(data, file)
-        elif isinstance(data, np.ndarray):
-            data_list = data.tolist()
+        if isinstance(data, list) or isinstance(data, np.ndarray):
+            data_list = data if isinstance(data, list) else data.tolist()
             with open(file_name, 'w') as file:
                 json.dump(data_list, file)
         else:
             with open(file_name, 'w') as file:
                 json.dump(data, file)
-
 
 def build_model_from_json(data_path):
     """
@@ -160,40 +162,51 @@ def build_model_from_json(data_path):
     """
 
     # Define the file names for JSON files
-    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json']
+    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json',
+                  'variable_names.json']
 
     # Initialize data variables
     A, b, c, lb, ub, of_sense, cons_senses = None, None, None, None, None, None, None
 
+    variable_names = None
+
     # Load data from JSON files
     for file_name in file_names:
         file_path = os.path.join(data_path, file_name)
-        with open(file_path, 'r') as file:
-            data = json.load(file)
 
-            if file_name == 'A.json':
-                A = sp.csr_matrix(np.array(data))
-            elif file_name == 'b.json':
-                b = np.array(data)
-            elif file_name == 'c.json':
-                c = np.array(data)
-            elif file_name == 'lb.json':
-                lb = np.array(data)
-            elif file_name == 'ub.json':
-                ub = np.array(data)
-            elif file_name == 'of_sense.json':
-                of_sense = data
-            elif file_name == 'cons_senses.json':
-                cons_senses = data
+        try:
+            with open(file_path, 'r') as file:
+                data = json.load(file)
+
+                if file_name == 'A.json':
+                    A = sp.csr_matrix(np.array(data))
+                elif file_name == 'b.json':
+                    b = np.array(data)
+                elif file_name == 'c.json':
+                    c = np.array(data)
+                elif file_name == 'lb.json':
+                    lb = np.array(data)
+                elif file_name == 'ub.json':
+                    ub = np.array(data)
+                elif file_name == 'of_sense.json':
+                    of_sense = data
+                elif file_name == 'cons_senses.json':
+                    cons_senses = data
+                elif file_name == 'variable_names.json':
+                    variable_names = data
+        except FileNotFoundError:
+            # Skip if the file does not exist
+            continue
 
     # Create a Gurobi model and add variables
     num_variables = len(c)
     model = gp.Model()
 
-    # Add variables with names starting from x1
+    # Add variables with provided names or default to x1, x2, etc.
     x = []
     for i in range(num_variables):
-        x.append(model.addVar(lb=lb[i], ub=ub[i], name=f'x{i + 1}'))
+        var_name = variable_names[i] if variable_names is not None and i < len(variable_names) else f'x{i + 1}'
+        x.append(model.addVar(lb=lb[i], ub=ub[i], name=var_name))
     model.update()
 
     # Set objective function

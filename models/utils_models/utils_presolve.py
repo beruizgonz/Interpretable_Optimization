@@ -1,5 +1,8 @@
 import numpy as np
 from gurobipy import GRB
+from scipy.sparse import csr_matrix
+from Interpretable_Optimization.models.utils_models.utils_functions import get_model_matrices, save_json, \
+    build_model_from_json
 
 
 def get_row_activities(model):
@@ -234,12 +237,13 @@ def eliminate_zero_columns(model):
     """
 
     feedback = {}
-    for var in model.getVars():
+    A = model.getA()
+    for j, var in enumerate(model.getVars()):
         # Extract the column corresponding to the variable
-        col = model.getCol(var)
+        col = A.A[:, j]
 
         # Check if all coefficients in the column are zero
-        if all(coef == 0 for coef in col):
+        if all(c == 0 for c in col):
             c_j = var.obj
 
             # Classify based on c_j value
@@ -253,7 +257,7 @@ def eliminate_zero_columns(model):
     return feedback
 
 
-def eliminate_singleton_equalities(model):
+def eliminate_singleton_equalities(model, current_matrices_path):
     """
     This function processes a Gurobi model to eliminate singleton equality constraints.
     It simplifies the model by fixing variables and updating the model accordingly.
@@ -272,50 +276,81 @@ def eliminate_singleton_equalities(model):
     # Variable to track if we found a singleton in the current iteration
     found_singleton = True
 
+    # Dictionary to store solutions for singletons
+    solution = {}
+
     while found_singleton:
         found_singleton = False
 
-        # Iterate over the constraints
-        for constr in copied_model.getConstrs():
-            # Check if the constraint is an equality constraint
-            if constr.Sense == GRB.EQUAL:
-                # Extract the row of this constraint
-                row = copied_model.getRow(constr)
-                non_zero_coeffs = np.nonzero(row.getA())[0]
+        # Getting the matrices of the model
+        A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(copied_model)
 
-                # Check if it's a singleton row
-                if len(non_zero_coeffs) == 1:
-                    found_singleton = True
-                    k = non_zero_coeffs[0]
-                    var_k = row.getVar(k)
-                    a_ik = row.getCoeff(k)
-                    b_i = constr.RHS
+        # Getting objective function expression
+        of = copied_model.getObjective()
 
-                    # Calculate the fixed value for x_k
-                    x_k = b_i / a_ik
+        # Getting the variable names
+        variable_names = [var.VarName for var in copied_model.getVars()]
 
-                    if x_k >= 0:
-                        # Update b for all constraints
-                        for other_constr in copied_model.getConstrs():
-                            other_row = copied_model.getRow(other_constr)
-                            other_row.addTerms(-x_k, var_k)
-                            copied_model.chgCoeff(other_constr, var_k, 0)
+        # Getting the number of nonzero elements per row
+        nonzero_count_per_row = np.count_nonzero(A.A, axis=1)
 
-                        # Update objective constant if necessary
-                        c_k = var_k.Obj
-                        if c_k != 0:
-                            copied_model.setObjective(copied_model.getObjective() - c_k * x_k)
+        # Create a boolean array where True indicates rows with a single non-zero element
+        single_nonzero = nonzero_count_per_row == 1
 
-                        # Remove the i-th row and k-th column
-                        copied_model.remove(constr)
-                        copied_model.remove(var_k)
-                    else:
-                        # Problem is infeasible
-                        return "Warning: Model is infeasible due to a negative singleton."
+        # Create a boolean array where True indicates rows with '=' constraint sense
+        equality_constraints = np.array(cons_senses) == '='
 
-                    # Break from the for loop as the model has changed
-                    break
+        # Combine the two conditions
+        valid_rows = np.logical_and(single_nonzero, equality_constraints)
+
+        # Find the index of the first row that satisfies both conditions
+        first_singleton_index = np.where(valid_rows)[0][0] if np.any(valid_rows) else None
+
+        # Check if the equality singleton row exists and process it
+        if first_singleton_index is not None:
+
+            found_singleton = True
+            # Extract the singleton row
+            singleton_row = A.A[first_singleton_index, :]
+
+            # Identify the non-zero column (k)
+            k_index = np.nonzero(singleton_row)[0][0]
+
+            # Calculate the value for the variable corresponding to the singleton row
+            x_k = b[first_singleton_index] / A.A[first_singleton_index, k_index]
+
+            if x_k >= 0:
+                # Update the solution dictionary
+                solution[variable_names[k_index]] = x_k
+
+                # update b
+                b = b - A.A[:, k_index] * x_k
+                b = np.delete(b, first_singleton_index)
+                b = b.tolist()
+
+                # update objective function constant
+                if c[k_index] != 0:
+                    of = of - c[k_index]*x_k
+
+                # Update A
+                A_new = np.delete(A.A, first_singleton_index, axis=0)  # Delete row
+                A_new = np.delete(A_new, k_index, axis=1)  # Delete column
+                A = csr_matrix(A_new)
+
+                # update c, lb, ub and cons_senses
+                del c[k_index]
+                lb = np.delete(lb, k_index)
+                ub = np.delete(ub, k_index)
+                del cons_senses[first_singleton_index]
+                del variable_names[k_index]
+
+                save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, variable_names)
+                copied_model = build_model_from_json(current_matrices_path)
+
+            else:
+                # Problem is infeasible
+                return "Warning: Model is infeasible due to a negative singleton."
 
     # Update the model
     copied_model.update()
-    return copied_model
+    return copied_model, solution
