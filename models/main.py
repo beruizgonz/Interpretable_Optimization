@@ -14,7 +14,8 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json
 
 from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
-    feedback_individual_constraints, small_coefficient_reduction, eliminate_zero_columns, eliminate_singleton_equalities
+    feedback_individual_constraints, small_coefficient_reduction, eliminate_zero_columns, \
+    eliminate_singleton_equalities, eliminate_zero_rows, eliminate_doubleton_equalities, eliminate_kton_equalities
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -30,8 +31,9 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'models_library',
-                             "name": 'transp_singleton.mps'},
+                             "name": 'doubleton.mps'},
               "print_mathematical_format": False,
+              "quality_check": False,
               "verbose": 0,
               "print_detail_sol": False,
               "save_original_model": {"val": False,
@@ -39,7 +41,11 @@ if __name__ == "__main__":
                                       "save_path": 'models_library'},
               "rhs_sensitivity": False,
               "cost_sensitivity": False,
-              "presolve_operations": True,
+              "presolve_operations": {"eliminate_zero_rows": False,
+                                      "eliminate_zero_columns": False,
+                                      "eliminate_singleton_equalities": False,
+                                      "eliminate_doubleton_equalities": False,
+                                      "eliminate_kton_equalities": True,},
               "test_sparsification": {"val": False,
                                       "threshold": 0.13},
               "test_constraint_red": {"val": False,
@@ -110,10 +116,10 @@ if __name__ == "__main__":
             # Single model specified
             model_files = [model_names]
 
+
     # ============================================== Iterative Process =================================================
     def nested_dict():
         return defaultdict(nested_dict)
-
 
     sparsification_results = defaultdict(nested_dict)
     total_models = len(model_files)
@@ -126,7 +132,7 @@ if __name__ == "__main__":
 
         log.info(f"{datetime.now()}: Processing Model {index} of {total_models} - {model_name}")
 
-        # =============================================== Pre-processing the model =====================================
+        # ============================================ Standardization of the model ====================================
         log.info(
             f"{str(datetime.now())}: Pre-processing the model...")
         original_primal = pre_processing_model(original_primal_bp)
@@ -138,18 +144,18 @@ if __name__ == "__main__":
 
             s_path = os.path.join(data_path, config["save_original_model"]["save_path"])
             model_to_save = os.path.join(s_path, config["save_original_model"]["save_name"])
-            original_primal.write(model_to_save)
+            original_primal_bp.write(model_to_save)
 
         # ================================= Getting matrices and data of the original model ============================
         log.info(
             f"{str(datetime.now())}: Accessing matrix A, right-hand side b, cost function c, and the bounds of "
             f"the original model...")
-        A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(original_primal)
+        A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(original_primal)
 
         # ====================================== Saving matrices as json in the path ===================================
         log.info(
             f"{str(datetime.now())}: Saving A, b, c, lb and ub...")
-        save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path)
+        save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co)
 
         # ============================= Creating the primal and the dual models from json files ========================
         log.info(
@@ -159,7 +165,8 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Creating dual model by loading A, b, c, lb and ub...")
         created_dual = build_dual_model_from_json(current_matrices_path)
-        A_dual, b_dual, c_dual, lb_dual, ub_dual, of_sense_dual, cons_senses_dual = get_model_matrices(created_dual)
+        A_dual, b_dual, c_dual, co_dual, lb_dual, ub_dual, of_sense_dual, cons_senses_dual = get_model_matrices(
+            created_dual)
 
         # ====================================== Printing model in mathematical format =================================
         if config['print_mathematical_format']:
@@ -179,26 +186,45 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Solving the original_primal model (before pre-processing)...")
         original_primal_bp.setParam('OutputFlag', config['verbose'])
-        original_primal_bp.optimize()
-        original_primal_bp_sol = original_primal_bp.objVal
+        try:
+            original_primal_bp.optimize()
+            original_primal_bp_sol = original_primal_bp.objVal
+        except:
+            print(f"Warning: Optimal solution was not found.")
+            original_primal_bp_sol = None
 
         log.info(
             f"{str(datetime.now())}: Solving the original_primal model (after pre-processing)...")
         original_primal.setParam('OutputFlag', config['verbose'])
-        original_primal.optimize()
-        original_primal_sol = original_primal.objVal
+
+        try:
+            original_primal.optimize()
+            original_primal_sol = original_primal.objVal
+        except:
+            print("Warning: Optimal solution was not found.")
+            original_primal_sol = None
 
         log.info(
             f"{str(datetime.now())}: Solving the created_primal model...")
         created_primal.setParam('OutputFlag', config['verbose'])
-        created_primal.optimize()
-        created_primal_sol = created_primal.objVal
+
+        try:
+            created_primal.optimize()
+            created_primal_sol = created_primal.objVal
+        except:
+            print(f"Warning: Optimal solution was not found.")
+            created_primal_sol = None
 
         log.info(
             f"{str(datetime.now())}: Solving the created_dual model...")
         created_dual.setParam('OutputFlag', config['verbose'])
-        created_dual.optimize()
-        created_dual_sol = created_dual.objVal
+
+        try:
+            created_dual.optimize()
+            created_dual_sol = created_dual.objVal
+        except:
+            print(f"Warning: Optimal solution was not found.")
+            created_dual_sol = None
 
         # ============================== Comparing solutions: original_primal X created_primal =========================
 
@@ -210,7 +236,7 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Solving the normalized primal model...")
 
-        A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(original_primal)
+        A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(original_primal)
         A_norm, A_scaler = normalize_features(A)
         b_norm = b / A_scaler
         save_json(A_norm, b_norm, c, lb, ub, of_sense, cons_senses, current_matrices_path)
@@ -219,22 +245,57 @@ if __name__ == "__main__":
         created_primal_norm.optimize()
 
         # ================================================== Quality check =============================================
-
-        quality_check(original_primal_bp, original_primal, created_primal, created_dual, tolerance=1e-2)
-        log.info(
-            f"{str(datetime.now())}: Quality check passed...")
-
-        # =========================================== Presolve like operation ==========================================
-        if config['presolve_operations']:
+        if config['quality_check']:
+            quality_check(original_primal_bp, original_primal, created_primal, created_dual, tolerance=1e-2)
             log.info(
-                f"{str(datetime.now())}: Presolve like operations")
-            model, solution = eliminate_singleton_equalities(original_primal_bp, current_matrices_path)
-            fd_var = eliminate_zero_columns(original_primal_bp)
-            SUPP, INF, SUP = get_row_activities(original_primal_bp)
+                f"{str(datetime.now())}: Quality check passed...")
 
-            feedback_matrix = feedback_individual_constraints(original_primal_bp)
+        # =============================================== Presolve operations ==========================================
+        current_model = original_primal_bp.copy()
 
-            new_model, changes = small_coefficient_reduction(original_primal_bp)
+        if config['presolve_operations']['eliminate_zero_rows']:
+            log.info(
+                f"{str(datetime.now())}: Presolve operations - eliminate_zero_rows")
+            print_model_in_mathematical_format(current_model)
+            current_model, feedback = eliminate_zero_rows(current_model, current_matrices_path)
+
+        if config['presolve_operations']['eliminate_zero_columns']:
+            log.info(
+                f"{str(datetime.now())}: Presolve operations - eliminate_zero_columns")
+            current_model.update()
+            print_model_in_mathematical_format(current_model)
+            current_model, feedback = eliminate_zero_columns(current_model, current_matrices_path)
+
+        if config['presolve_operations']['eliminate_singleton_equalities']:
+            log.info(
+                f"{str(datetime.now())}: Presolve operations - eliminate_singleton_equalities")
+            current_model.update()
+            print_model_in_mathematical_format(current_model)
+            current_model, solution = eliminate_singleton_equalities(current_model, current_matrices_path)
+
+        if config['presolve_operations']['eliminate_doubleton_equalities']:
+            log.info(
+                f"{str(datetime.now())}: Presolve operations - eliminate_doubleton_equalities")
+            current_model.update()
+            print_model_in_mathematical_format(current_model)
+
+            current_model = eliminate_doubleton_equalities(current_model, current_matrices_path)
+        if config['presolve_operations']['eliminate_kton_equalities']:
+            log.info(
+                f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
+            current_model.update()
+            print_model_in_mathematical_format(current_model)
+            copied_model, kton_dict = eliminate_kton_equalities(current_model, current_matrices_path, 3)
+
+        current_model.update()
+        print_model_in_mathematical_format(current_model)
+
+        # fd_var = eliminate_zero_columns(original_primal_bp)
+        # SUPP, INF, SUP = get_row_activities(original_primal_bp)
+        #
+        # feedback_matrix = feedback_individual_constraints(original_primal_bp)
+        #
+        # new_model, changes = small_coefficient_reduction(original_primal_bp)
 
         # ============================================ rhs sensitivity analysis ========================================
         if config['rhs_sensitivity']:

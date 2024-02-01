@@ -93,13 +93,17 @@ def get_model_matrices(model):
     # Access the sense of optimization
     of_sense = model.ModelSense
 
+    # get the constant in the of
+    of = model.getObjective()
+    co = of.getConstant()
+
     # Access the sense of each constraint
     cons_senses = [constr.Sense for constr in model.getConstrs()]
 
-    return A, b, c, lb, ub, of_sense, cons_senses
+    return A, b, c, co, lb, ub, of_sense, cons_senses
 
 
-def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path, variable_names=None):
+def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path, co=0, variable_names=None):
     """
     Save matrices and data structures as JSON files, including the sense of optimization and constraints.
 
@@ -112,6 +116,7 @@ def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path, variable_names=
     - of_sense (int): Sense of optimization (1 for minimize, -1 for maximize).
     - cons_senses (list): List of senses for each constraint.
     - save_path (str): Path to save JSON files.
+    - co (float, optional): constant of objective function. Default is 0
     - variable_names (list, optional): Names of the decision variables. If None, defaults to x1, x2, ...
 
     The data includes the constraint matrix A, vectors b, c, lower bounds lb, upper bounds ub,
@@ -120,13 +125,14 @@ def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path, variable_names=
 
     # Generate default variable names if not provided
     if variable_names is None:
-        variable_names = [f'x{i+1}' for i in range(A.shape[1])]
+        variable_names = [f'x{i + 1}' for i in range(A.shape[1])]
 
     # Create a dictionary to store the data
     data_dict = {
         'A': A.toarray(),  # Convert csr_matrix to dense array for JSON
         'b': b,
         'c': c,
+        'co': co,
         'lb': lb,
         'ub': ub,
         'of_sense': of_sense,
@@ -149,6 +155,7 @@ def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path, variable_names=
             with open(file_name, 'w') as file:
                 json.dump(data, file)
 
+
 def build_model_from_json(data_path):
     """
     Build a Gurobi model from JSON files containing matrices, data, and model specifications.
@@ -162,13 +169,10 @@ def build_model_from_json(data_path):
     """
 
     # Define the file names for JSON files
-    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json',
-                  'variable_names.json']
+    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json', 'co.json', 'variable_names.json']
 
     # Initialize data variables
-    A, b, c, lb, ub, of_sense, cons_senses = None, None, None, None, None, None, None
-
-    variable_names = None
+    A, b, c, lb, ub, of_sense, cons_senses, co, variable_names = None, None, None, None, None, None, None, None, None
 
     # Load data from JSON files
     for file_name in file_names:
@@ -192,6 +196,8 @@ def build_model_from_json(data_path):
                     of_sense = data
                 elif file_name == 'cons_senses.json':
                     cons_senses = data
+                elif file_name == 'co.json':
+                    co = data
                 elif file_name == 'variable_names.json':
                     variable_names = data
         except FileNotFoundError:
@@ -211,6 +217,9 @@ def build_model_from_json(data_path):
 
     # Set objective function
     objective_expr = gp.quicksum(c[i] * x[i] for i in range(num_variables))
+    if co is not None:
+        objective_expr += co
+
     model.setObjective(objective_expr, of_sense)
 
     # Add constraints
@@ -221,9 +230,9 @@ def build_model_from_json(data_path):
         coefficients = A.data[start:end]
 
         constraint_expr = gp.quicksum(coefficients[j] * x[variables[j]] for j in range(len(variables)))
-        if cons_senses[i] == '<':
+        if cons_senses[i] == '<' or cons_senses[i] == '<=':
             model.addConstr(constraint_expr <= b[i], name=f'constraint_{i}')
-        elif cons_senses[i] == '>':
+        elif cons_senses[i] == '>' or cons_senses[i] == '>=':
             model.addConstr(constraint_expr >= b[i], name=f'constraint_{i}')
         elif cons_senses[i] == '=':
             model.addConstr(constraint_expr == b[i], name=f'constraint_{i}')
@@ -346,7 +355,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
       - dv is a list of decision variable values for each threshold.
     """
 
-    A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(model)
+    A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(model)
 
     # Calculate normalized A
     A_norm, _ = normalize_features(A)
@@ -612,7 +621,7 @@ def constraint_reduction(model, threshold, path):
     """
 
     # Extract matrices and vectors from the model
-    A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(model)
+    A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(model)
 
     # Normalize A
     A_norm, _ = normalize_features(A)
@@ -651,7 +660,7 @@ def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params,
       - dv is a list of decision variable values for each threshold.
     """
 
-    A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(model)
+    A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(model)
 
     # Calculate normalized A
     A_norm, _ = normalize_features(A)
@@ -739,7 +748,7 @@ def measuring_constraint_infeasibility(target_model, decisions):
     """
 
     # Extract A, b and c from the target model
-    A, b, c, _, _, _, _ = get_model_matrices(target_model)
+    A, b, c, _, _, _, _, _ = get_model_matrices(target_model)
     cost = np.array(c)
 
     # Initialize arrays to store violations
@@ -949,7 +958,7 @@ def sparsification_test(original_model, config, current_matrices_path):
     None: The function prints the results.
     """
     # Extract matrices and vectors from the original model
-    A, b, c, lb, ub, of_sense, cons_senses = get_model_matrices(original_model)
+    A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(original_model)
     A_norm, A_scaler = normalize_features(A)
 
     # Apply matrix sparsification
@@ -1205,5 +1214,44 @@ def dict2json(dictionary, file_path):
         json.dump(dictionary, file, default=convert_ndarray, indent=4)
 
 
+def get_constraint_expression(model, i):
+    """
+    Retrieves the i-th constraint from the Gurobi model and returns it as a string expression.
 
+    Parameters:
+    model (gurobipy.Model): The Gurobi model from which to extract the constraint.
+    i (int): The index of the constraint to be retrieved.
+
+    Returns:
+    str: The constraint expressed in the form 'LHS operation RHS'.
+         For example, '2x + 3y <= 5'.
+
+    Raises:
+    IndexError: If the index i is out of the range of the model's constraints.
+    """
+    # Ensure the index is within the range of constraints
+    if i < 0 or i >= model.NumConstrs:
+        raise IndexError("Constraint index is out of range.")
+
+    # Retrieve the i-th constraint
+    i_th_constraint = model.getConstrs()[i]
+
+    # Get the linear expression (LHS) of the constraint
+    lhs_expression = model.getRow(i_th_constraint)
+
+    # Get the sense (equality/inequality) of the constraint
+    constraint_sense = i_th_constraint.Sense
+
+    # Get the RHS of the constraint
+    rhs_value = i_th_constraint.RHS
+
+    # Convert the sense symbol to a readable format
+    sense_symbol = {
+        GRB.LESS_EQUAL: "<=",
+        GRB.GREATER_EQUAL: ">=",
+        GRB.EQUAL: "="
+    }.get(constraint_sense, "?")
+
+    # Construct and return the full constraint expression
+    return f"{lhs_expression} {sense_symbol} {rhs_value}"
 
