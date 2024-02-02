@@ -15,7 +15,8 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
 
 from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
     feedback_individual_constraints, small_coefficient_reduction, eliminate_zero_columns, \
-    eliminate_singleton_equalities, eliminate_zero_rows, eliminate_doubleton_equalities, eliminate_kton_equalities
+    eliminate_singleton_equalities, eliminate_zero_rows, eliminate_doubleton_equalities, eliminate_kton_equalities, \
+    eliminate_singleton_inequalities
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -285,7 +286,9 @@ if __name__ == "__main__":
                 f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
-            copied_model, kton_dict = eliminate_kton_equalities(current_model, current_matrices_path, 3)
+            current_model, kton_dict = eliminate_kton_equalities(current_model, current_matrices_path, 3)
+            current_model.update()
+            eliminate_singleton_inequalities(current_model, current_matrices_path)
 
         current_model.update()
         print_model_in_mathematical_format(current_model)

@@ -638,3 +638,90 @@ def eliminate_kton_equalities(model, current_matrices_path, k):
                 k -=1
     copied_model.update()
     return copied_model, kton_dict
+
+
+def eliminate_singleton_inequalities(model, current_matrices_path):
+    """
+    This function processes a Gurobi model to eliminate singleton inequality constraints.
+    It simplifies the model by removing redundant constraints and updating the model accordingly.
+
+    Args:
+    model (gurobipy.Model): The Gurobi model to process.
+
+    Returns:
+    gurobipy.Model: The updated Gurobi model after eliminating singleton equalities.
+    """
+
+    # Copy the model to avoid modifying the original
+    copied_model = model.copy()
+
+    # Getting the matrices of the model
+    A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(copied_model)
+
+    # Getting the variable names
+    variable_names = [var.VarName for var in copied_model.getVars()]
+
+    # Getting the number of nonzero elements per row
+    nonzero_count_per_row = np.count_nonzero(A.A, axis=1)
+
+    # Create a boolean array where True indicates rows with a single non-zero element
+    single_nonzero = nonzero_count_per_row == 1
+
+    # Create a boolean array where True indicates rows with inequalities constraint sense
+    inequality_constraints = np.array(cons_senses) != '='
+
+    # Combine the two conditions
+    valid_rows = np.logical_and(single_nonzero, inequality_constraints)
+    #
+    # # Find the index of the rows that satisfies both conditions
+    # singleton_indexes = np.where(valid_rows)[0] if np.any(valid_rows) else None
+
+    # Identify zero rows and classify constraints
+    feedback = {}
+    to_delete = []
+    for i, constr in enumerate(copied_model.getConstrs()):
+        if valid_rows[i]:
+
+            # Extract the singleton row
+            singleton_row = A.A[i, :]
+
+            # Identify the index of the non-zero column (k)
+            k_index = np.nonzero(singleton_row)[0][0]
+
+            # Identify Aik
+            A_ik = singleton_row[k_index]
+
+            # Identify the operation (< or >)
+            k_sense = cons_senses[i]
+
+            # Identify the right-hand-side
+            b_k = b[i]
+
+            if k_sense == '<' or k_sense == '<=':
+                if (A_ik>0) and (b_k<=0):
+                    feedback[i] = 'Infeasible'
+                elif (A_ik<0) and (b_k>=0):
+                    feedback[i] = 'Redundant'
+                    to_delete.append(i)
+
+            elif k_sense == '>' or k_sense == '>=':
+                if (A_ik>0) and (b_k<=0):
+                    feedback[i] = 'Redundant'
+                    to_delete.append(i)
+                elif (A_ik<0) and (b_k>=0):
+                    feedback[i] = 'Infeasible'
+        else:
+            feedback[i] = 'Valid'
+
+    # update A and b excluding the zero-constraints
+    A_new = np.delete(A.A, to_delete, axis=0)
+    A = csr_matrix(A_new)
+
+    # Delete elements from b
+    for index in to_delete:
+        del b[index]
+
+    save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
+    model_copy = build_model_from_json(current_matrices_path)
+
+    return model_copy, feedback
