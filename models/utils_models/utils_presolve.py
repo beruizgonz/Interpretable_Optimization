@@ -199,10 +199,6 @@ def eliminate_zero_rows(model, current_matrices_path):
         # Getting the matrices of the model
         A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(model_copy)
 
-        # Getting objective function expression
-        of = model_copy.getObjective()
-        co = of.getConstant()
-
         # Getting the variable names
         variable_names = [var.VarName for var in model_copy.getVars()]
 
@@ -271,10 +267,6 @@ def eliminate_zero_columns(model, current_matrices_path):
     # Getting the matrices of the model
     A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(copied_model)
 
-    # Getting objective function expression
-    of = copied_model.getObjective()
-    co = of.getConstant()
-
     # Getting the variable names
     variable_names = [var.VarName for var in copied_model.getVars()]
 
@@ -302,10 +294,12 @@ def eliminate_zero_columns(model, current_matrices_path):
     A_new = np.delete(A.A, to_delete, axis=1)  # Delete column
     A = csr_matrix(A_new)
 
-    # Delete elements from b
+    # Delete elements from c
     for index in to_delete:
         del c[index]
         del variable_names[index]
+        lb = np.delete(lb, index)
+        ub = np.delete(ub, index)
 
     save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
     copied_model = build_model_from_json(current_matrices_path)

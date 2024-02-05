@@ -32,7 +32,7 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'models_library',
-                             "name": 'doubleton.mps'},
+                             "name": 'transp_singleton.mps'},
               "print_mathematical_format": False,
               "quality_check": False,
               "verbose": 0,
@@ -43,10 +43,11 @@ if __name__ == "__main__":
               "rhs_sensitivity": False,
               "cost_sensitivity": False,
               "presolve_operations": {"eliminate_zero_rows": False,
-                                      "eliminate_zero_columns": False,
+                                      "eliminate_zero_columns": True,
                                       "eliminate_singleton_equalities": False,
                                       "eliminate_doubleton_equalities": False,
-                                      "eliminate_kton_equalities": True,},
+                                      "eliminate_kton_equalities": False,
+                                      "eliminate_singleton_inequalities": False},
               "test_sparsification": {"val": False,
                                       "threshold": 0.13},
               "test_constraint_red": {"val": False,
@@ -258,37 +259,42 @@ if __name__ == "__main__":
             log.info(
                 f"{str(datetime.now())}: Presolve operations - eliminate_zero_rows")
             print_model_in_mathematical_format(current_model)
-            current_model, feedback = eliminate_zero_rows(current_model, current_matrices_path)
+            current_model, feedback_zero_rows = eliminate_zero_rows(current_model, current_matrices_path)
 
         if config['presolve_operations']['eliminate_zero_columns']:
             log.info(
                 f"{str(datetime.now())}: Presolve operations - eliminate_zero_columns")
             current_model.update()
             print_model_in_mathematical_format(current_model)
-            current_model, feedback = eliminate_zero_columns(current_model, current_matrices_path)
+            current_model, feedback_zero_columns = eliminate_zero_columns(current_model, current_matrices_path)
 
         if config['presolve_operations']['eliminate_singleton_equalities']:
             log.info(
                 f"{str(datetime.now())}: Presolve operations - eliminate_singleton_equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
-            current_model, solution = eliminate_singleton_equalities(current_model, current_matrices_path)
+            current_model, solution_singleton_equalities = eliminate_singleton_equalities(current_model, current_matrices_path)
 
         if config['presolve_operations']['eliminate_doubleton_equalities']:
             log.info(
                 f"{str(datetime.now())}: Presolve operations - eliminate_doubleton_equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
-
             current_model = eliminate_doubleton_equalities(current_model, current_matrices_path)
+
         if config['presolve_operations']['eliminate_kton_equalities']:
             log.info(
                 f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
             current_model, kton_dict = eliminate_kton_equalities(current_model, current_matrices_path, 3)
+
+        if config['presolve_operations']['eliminate_singleton_inequalities']:
+            log.info(
+                f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
             current_model.update()
-            eliminate_singleton_inequalities(current_model, current_matrices_path)
+            print_model_in_mathematical_format(current_model)
+            current_model, feedback_3 = eliminate_singleton_inequalities(current_model, current_matrices_path)
 
         current_model.update()
         print_model_in_mathematical_format(current_model)
