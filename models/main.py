@@ -11,7 +11,7 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \
     print_model_in_mathematical_format, visual_join_sensitivity, \
     measuring_constraint_infeasibility, quality_check, sparsification_test, constraint_reduction_test, get_info_GAMS, \
-    detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json
+    detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json, canonical_form
 
 from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
     feedback_individual_constraints, small_coefficient_reduction, eliminate_zero_columns, \
@@ -31,10 +31,11 @@ if __name__ == "__main__":
                                "n_variables": 50000,
                                "n_constraints": 4},
               "load_model": {"val": True,
-                             "load_path": 'models_library',
-                             "name": 'transp_singleton.mps'},
-              "print_mathematical_format": False,
-              "quality_check": False,
+                             "load_path": 'GAMS_library',
+                             "name": 'TRNSPORT.mps'},
+              "print_mathematical_format": True,
+              "original_primal_canonical": True,
+              "quality_check": True,
               "verbose": 0,
               "print_detail_sol": False,
               "save_original_model": {"val": False,
@@ -118,10 +119,10 @@ if __name__ == "__main__":
             # Single model specified
             model_files = [model_names]
 
-
     # ============================================== Iterative Process =================================================
     def nested_dict():
         return defaultdict(nested_dict)
+
 
     sparsification_results = defaultdict(nested_dict)
     total_models = len(model_files)
@@ -135,8 +136,11 @@ if __name__ == "__main__":
         log.info(f"{datetime.now()}: Processing Model {index} of {total_models} - {model_name}")
 
         # ============================================ Standardization of the model ====================================
+
         log.info(
-            f"{str(datetime.now())}: Pre-processing the model...")
+            f"{str(datetime.now())}: Standardization of the model...")
+        canonical_model, track_elements = canonical_form(original_primal_bp)
+
         original_primal = pre_processing_model(original_primal_bp)
 
         # ======================================= saving the original_primal model in the path =========================
@@ -179,6 +183,8 @@ if __name__ == "__main__":
             print_model_in_mathematical_format(original_primal_bp)
             print("==================== Original Model after pre-processing ==================== ")
             print_model_in_mathematical_format(original_primal)
+            print("==================== Original Model in canonical form ==================== ")
+            print_model_in_mathematical_format(canonical_model)
             print("==================== Model created from matrices ==================== ")
             print_model_in_mathematical_format(created_primal)
             print("==================== Dual model created from matrices ==================== ")
@@ -209,6 +215,13 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Solving the created_primal model...")
         created_primal.setParam('OutputFlag', config['verbose'])
+
+        try:
+            canonical_model.optimize()
+            canonical_model_sol = canonical_model.objVal
+        except:
+            print(f"Warning: Optimal solution was not found.")
+            canonical_model_sol = None
 
         try:
             created_primal.optimize()
@@ -248,7 +261,8 @@ if __name__ == "__main__":
 
         # ================================================== Quality check =============================================
         if config['quality_check']:
-            quality_check(original_primal_bp, original_primal, created_primal, created_dual, tolerance=1e-2)
+            quality_check(original_primal_bp, original_primal, created_primal, created_dual, canonical_model,
+                          track_elements, tolerance=1e-2)
             log.info(
                 f"{str(datetime.now())}: Quality check passed...")
 
@@ -273,7 +287,8 @@ if __name__ == "__main__":
                 f"{str(datetime.now())}: Presolve operations - eliminate_singleton_equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
-            current_model, solution_singleton_equalities = eliminate_singleton_equalities(current_model, current_matrices_path)
+            current_model, solution_singleton_equalities = eliminate_singleton_equalities(current_model,
+                                                                                          current_matrices_path)
 
         if config['presolve_operations']['eliminate_doubleton_equalities']:
             log.info(

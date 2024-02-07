@@ -11,6 +11,7 @@ from plotly.subplots import make_subplots
 from tabulate import tabulate
 import time
 import sys
+from gurobipy import GRB
 
 
 def create_original_model(n_variables, n_constraints):
@@ -787,7 +788,7 @@ def pre_processing_model(model):
     # Clone the original model to avoid altering it directly
     pre_processed_model = model.copy()
 
-    # Find the highest index among existing decision variables
+    # Find the decision variables
     existing_vars = pre_processed_model.getVars()
 
     # Handling variable bounds
@@ -897,20 +898,17 @@ def print_model_in_mathematical_format(model):
     print(bounds)
 
 
-def quality_check(original_primal_bp, original_primal, created_primal, created_dual, tolerance=1e-6):
+def quality_check(original_primal_bp, original_primal, created_primal, created_dual, canonical_primal, track_elements, tolerance=1e-6):
     """
-    Performs a quality check on the provided optimization models, including a normalized model.
-
-    This function compares the objective function values and decision variables of the primal models
-    (original_primal_bp, original_primal, created_primal, and created_primal_norm) and checks if the
-    objective function value of the created_dual model matches that of the original_primal_bp model.
+    Performs a quality check on the provided optimization models, including a canonical model.
 
     Parameters:
     - original_primal_bp: The primal model before preprocessing.
     - original_primal: The primal model after preprocessing.
     - created_primal: The primal model created from matrices.
     - created_dual: The dual model created from matrices.
-    - created_primal_norm: The normalized primal model.
+    - canonical_primal: The canonical form of the primal model.
+    - track_elements: A dictionary tracking the changes made to variables and constraints in the canonical model.
     - tolerance: A float representing the tolerance for comparison (default is 1e-6).
 
     Raises:
@@ -919,25 +917,43 @@ def quality_check(original_primal_bp, original_primal, created_primal, created_d
     Returns:
     - None
     """
+    # Compare objective values of the primal models including the canonical model
+    primal_models = [original_primal_bp, original_primal, created_primal, canonical_primal]
+    primal_models_names = ['original_primal_bp', 'original_primal', 'created_primal', 'canonical_primal']
 
-    # Compare objective values of the primal models
-    primal_models = [original_primal_bp, original_primal, created_primal]
     for model1 in primal_models:
         for model2 in primal_models:
             if abs(model1.objVal - model2.objVal) > tolerance:
                 raise ValueError(
                     f"Quality check failed: Objective function values differ between {model1.ModelName} and {model2.ModelName}")
 
-    primal_created_models = [original_primal, created_primal]
-    # Compare decision variables of the primal models
+    # Building the dictionary of decision variables
+    decision_vars = {}
+    for ind, model in enumerate(primal_models):
+        decision_vars[primal_models_names[ind]] = {}
+        for var in model.getVars():
+            if var.VarName.endswith("_pos"):
+                original_var_name = var.VarName[:-4]  # Removing '_pos' to get the original variable name
+                var_neg = model.getVarByName(f"{original_var_name}_neg")
+                decision_vars[primal_models_names[ind]][original_var_name] = var.x - var_neg.x
+            elif not var.VarName.endswith("_neg"):
+                decision_vars[primal_models_names[ind]][var.VarName] = var.x
+
+    # Comparing decision variable values across models
+    primal_created_models = [original_primal, created_primal, canonical_primal]
+    primal_created_models_names = ['original_primal', 'created_primal', 'canonical_primal']
+
     for i in range(len(primal_created_models)):
         for j in range(i + 1, len(primal_created_models)):
-            model1_vars = primal_created_models[i].getVars()
-            model2_vars = primal_created_models[j].getVars()
-            for var1, var2 in zip(model1_vars, model2_vars):
-                if abs(var1.x - var2.x) > tolerance:
-                    raise ValueError(
-                        f"Quality check failed: Decision variable {var1.VarName} differs between {primal_models[i].ModelName} and {primal_models[j].ModelName}")
+            model1_name = primal_created_models_names[i]
+            model2_name = primal_created_models_names[j]
+            for var_name in decision_vars[model1_name]:
+                if var_name in decision_vars[model2_name]:
+                    var1_value = decision_vars[model1_name][var_name]
+                    var2_value = decision_vars[model2_name][var_name]
+                    if abs(var1_value - var2_value) > tolerance:
+                        raise ValueError(
+                            f"Quality check failed: Decision variable {var_name} differs between {model1_name} and {model2_name}")
 
     # Compare objective value of created_dual and original_primal_bp
     if abs(created_dual.objVal - original_primal_bp.objVal) > tolerance:
@@ -1255,3 +1271,140 @@ def get_constraint_expression(model, i):
     # Construct and return the full constraint expression
     return f"{lhs_expression} {sense_symbol} {rhs_value}"
 
+
+def canonical_form(model):
+    """
+    Converts a given Gurobi model into its canonical form.
+
+    In the canonical form, all variables are non-negative, and constraints are formatted uniformly as
+    either <= or >= depending on the problem being a maximization or minimization problem. This
+    function also handles bounded variables and equality constraints by converting them into the
+    appropriate inequality form.
+
+    Args:
+    - model: The Gurobi model to be converted.
+
+    Returns:
+    - canonical_model: The converted model in canonical form.
+    - track_elements: A dictionary tracking the changes made to variables and constraints
+      (original or created).
+    """
+
+    # Initialize tracking dictionaries for variables and constraints
+    track_elements = {'variables': {}, 'constraints': {}}
+
+    # Clone the model to avoid changing the original
+    canonical_model = model.copy()
+
+    # Handle variable bounds and convert them into constraints
+    for var in canonical_model.getVars():
+        lower_bound = var.LB
+        upper_bound = var.UB
+
+        # Handling lower bounds
+        if lower_bound > -gp.GRB.INFINITY and lower_bound != 0:
+            constr_name = f"{var.VarName}_lb"
+            if canonical_model.ModelSense == 1:  # Minimization
+                canonical_model.addConstr(var >= lower_bound, name=constr_name)
+            else:  # Maximization
+                canonical_model.addConstr(-var <= -lower_bound, name=constr_name)
+            var.LB = -gp.GRB.INFINITY
+            track_elements['constraints'][constr_name] = 'created'
+
+        # Handling upper bounds
+        if upper_bound < gp.GRB.INFINITY and upper_bound != 0:
+            constr_name = f"{var.VarName}_ub"
+            if canonical_model.ModelSense == 1:  # Minimization
+                canonical_model.addConstr(-var >= -upper_bound, name=constr_name)
+            else:  # Maximization
+                canonical_model.addConstr(var <= upper_bound, name=constr_name)
+            var.UB = gp.GRB.INFINITY
+            track_elements['constraints'][constr_name] = 'created'
+
+        track_elements['variables'][var.VarName] = 'original'
+
+    canonical_model.update()
+
+    # Handle equality constraints by converting them into two inequalities
+    for constr in canonical_model.getConstrs():
+        if constr.Sense == gp.GRB.EQUAL:
+            lhs_expr = canonical_model.getRow(constr)
+            rhs_value = constr.RHS
+            canonical_model.addConstr(lhs_expr >= rhs_value, name=constr.ConstrName + "_geq")
+            canonical_model.addConstr(lhs_expr <= rhs_value, name=constr.ConstrName + "_leq")
+            track_elements['constraints'][constr.ConstrName + "_geq"] = 'created'
+            track_elements['constraints'][constr.ConstrName + "_leq"] = 'created'
+            canonical_model.remove(constr)
+            track_elements['constraints'][constr.ConstrName] = 'removed'
+
+    canonical_model.update()
+
+    # Uniformize constraints to <= for maximization and >= for minimization
+    for constr in list(canonical_model.getConstrs()):  # Convert to list to avoid modification during iteration
+        lhs_expr = canonical_model.getRow(constr)
+        rhs_value = constr.RHS
+
+        if canonical_model.ModelSense == -1 and constr.Sense == gp.GRB.GREATER_EQUAL:  # Maximization
+            canonical_model.addConstr(-lhs_expr <= -rhs_value, name=constr.ConstrName + "_leq")
+            canonical_model.remove(constr)
+            track_elements['constraints'][constr.ConstrName + "_leq"] = 'created'
+
+        elif canonical_model.ModelSense == 1 and constr.Sense == gp.GRB.LESS_EQUAL:  # Minimization
+            canonical_model.addConstr(-lhs_expr >= -rhs_value, name=constr.ConstrName + "_geq")
+            canonical_model.remove(constr)
+            track_elements['constraints'][constr.ConstrName + "_geq"] = 'created'
+
+    canonical_model.update()
+
+    # Transform variables with negative lower bounds to non-negative
+    for var in list(canonical_model.getVars()):
+        if var.LB < 0:
+            # Create two auxiliary non-negative variables
+            x_pos = canonical_model.addVar(lb=0, name=f"{var.VarName}_pos")
+            x_neg = canonical_model.addVar(lb=0, name=f"{var.VarName}_neg")
+            canonical_model.update()
+
+            # Check if the variable is in the objective function and update it
+            of = canonical_model.getObjective()
+            variables_of = [of.getVar(i) for i in range(of.size())]
+            for ind_o in range(len(variables_of)):
+                if var.VarName == variables_of[ind_o].VarName:
+                    obj_coeff = canonical_model.getObjective().getCoeff(0)
+                    new_obj_expr = canonical_model.getObjective() + obj_coeff * (x_pos - x_neg - var)
+                canonical_model.setObjective(new_obj_expr)
+
+            # Replace original variable in all constraints
+            for constr in list(canonical_model.getConstrs()):
+                lhs_expr = canonical_model.getRow(constr)
+                variables = [lhs_expr.getVar(i) for i in range(lhs_expr.size())]
+
+                for ind in range(len(variables)):
+                    if var.VarName == variables[ind].VarName:
+                        var_coeff = lhs_expr.getCoeff(ind)
+                        # Create a new linear expression
+                        new_expr = gp.LinExpr(lhs_expr)
+                        new_expr.addTerms([var_coeff, -var_coeff], [x_pos, x_neg])
+
+                        # Update the constraint with the new expression
+                        new_constr_name = f"{constr.ConstrName}_mod"
+                        if constr.Sense == gp.GRB.LESS_EQUAL:
+                            canonical_model.addConstr(new_expr <= constr.RHS, name=new_constr_name)
+                        elif constr.Sense == gp.GRB.GREATER_EQUAL:
+                            canonical_model.addConstr(new_expr >= constr.RHS, name=new_constr_name)
+                        elif constr.Sense == gp.GRB.EQUAL:
+                            canonical_model.addConstr(new_expr == constr.RHS, name=new_constr_name)
+
+                        track_elements['constraints'][new_constr_name] = 'created'
+                        canonical_model.remove(constr)
+                        track_elements['constraints'][constr.ConstrName] = 'removed'
+
+            canonical_model.remove(var)
+            track_elements['variables'][var.VarName] = 'removed'
+            # track_elements['variables'][f"{var.VarName}_pos"] = 'created'
+            # track_elements['variables'][f"{var.VarName}_neg"] = 'created'
+            track_elements['variables'][f"{var.VarName}_pos"] = {'type': 'created', 'original_var': var.VarName}
+            track_elements['variables'][f"{var.VarName}_neg"] = {'type': 'created', 'original_var': var.VarName}
+
+    canonical_model.update()
+
+    return canonical_model, track_elements
