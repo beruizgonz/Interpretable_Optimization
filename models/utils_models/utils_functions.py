@@ -12,6 +12,7 @@ from tabulate import tabulate
 import time
 import sys
 from gurobipy import GRB
+from scipy.sparse import csr_matrix
 
 
 def create_original_model(n_variables, n_constraints):
@@ -101,7 +102,10 @@ def get_model_matrices(model):
     # Access the sense of each constraint
     cons_senses = [constr.Sense for constr in model.getConstrs()]
 
-    return A, b, c, co, lb, ub, of_sense, cons_senses
+    # Getting the variable names
+    variable_names = [var.VarName for var in model.getVars()]
+
+    return A, b, c, co, lb, ub, of_sense, cons_senses, variable_names
 
 
 def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path, co=0, variable_names=None):
@@ -356,7 +360,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
       - dv is a list of decision variable values for each threshold.
     """
 
-    A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(model)
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model)
 
     # Calculate normalized A
     A_norm, _ = normalize_features(A)
@@ -622,7 +626,7 @@ def constraint_reduction(model, threshold, path):
     """
 
     # Extract matrices and vectors from the model
-    A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(model)
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model)
 
     # Normalize A
     A_norm, _ = normalize_features(A)
@@ -661,7 +665,7 @@ def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params,
       - dv is a list of decision variable values for each threshold.
     """
 
-    A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(model)
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model)
 
     # Calculate normalized A
     A_norm, _ = normalize_features(A)
@@ -749,7 +753,7 @@ def measuring_constraint_infeasibility(target_model, decisions):
     """
 
     # Extract A, b and c from the target model
-    A, b, c, _, _, _, _, _ = get_model_matrices(target_model)
+    A, b, c, _, _, _, _, _, _ = get_model_matrices(target_model)
     cost = np.array(c)
 
     # Initialize arrays to store violations
@@ -898,7 +902,7 @@ def print_model_in_mathematical_format(model):
     print(bounds)
 
 
-def quality_check(original_primal_bp, original_primal, created_primal, created_dual, canonical_primal, track_elements, tolerance=1e-6):
+def quality_check(original_primal_bp, original_primal, created_primal, created_dual, tolerance=1e-6):
     """
     Performs a quality check on the provided optimization models, including a canonical model.
 
@@ -918,7 +922,7 @@ def quality_check(original_primal_bp, original_primal, created_primal, created_d
     - None
     """
     # Compare objective values of the primal models including the canonical model
-    primal_models = [original_primal_bp, original_primal, created_primal, canonical_primal]
+    primal_models = [original_primal_bp, original_primal, created_primal]
     primal_models_names = ['original_primal_bp', 'original_primal', 'created_primal', 'canonical_primal']
 
     for model1 in primal_models:
@@ -940,7 +944,7 @@ def quality_check(original_primal_bp, original_primal, created_primal, created_d
                 decision_vars[primal_models_names[ind]][var.VarName] = var.x
 
     # Comparing decision variable values across models
-    primal_created_models = [original_primal, created_primal, canonical_primal]
+    primal_created_models = [original_primal, created_primal]
     primal_created_models_names = ['original_primal', 'created_primal', 'canonical_primal']
 
     for i in range(len(primal_created_models)):
@@ -974,7 +978,7 @@ def sparsification_test(original_model, config, current_matrices_path):
     None: The function prints the results.
     """
     # Extract matrices and vectors from the original model
-    A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(original_model)
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_model)
     A_norm, A_scaler = normalize_features(A)
 
     # Apply matrix sparsification
@@ -1272,7 +1276,7 @@ def get_constraint_expression(model, i):
     return f"{lhs_expression} {sense_symbol} {rhs_value}"
 
 
-def canonical_form(model):
+def canonical_form(model, minOption=False):
     """
     Converts a given Gurobi model into its canonical form.
 
@@ -1283,6 +1287,7 @@ def canonical_form(model):
 
     Args:
     - model: The Gurobi model to be converted.
+    - minOption: If True, ensures the optimization problem is set to minimization.
 
     Returns:
     - canonical_model: The converted model in canonical form.
@@ -1295,6 +1300,11 @@ def canonical_form(model):
 
     # Clone the model to avoid changing the original
     canonical_model = model.copy()
+
+    # Set the model sense to minimization if minOption is True
+    if minOption and canonical_model.ModelSense != 1:
+        # Multiply the objective function by -1 to switch from maximization to minimization
+        canonical_model.setObjective(-1 * canonical_model.getObjective(), gp.GRB.MINIMIZE)
 
     # Handle variable bounds and convert them into constraints
     for var in canonical_model.getVars():
@@ -1408,3 +1418,6 @@ def canonical_form(model):
     canonical_model.update()
 
     return canonical_model, track_elements
+
+
+

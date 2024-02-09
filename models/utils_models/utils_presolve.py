@@ -5,6 +5,7 @@ from Interpretable_Optimization.models.utils_models.utils_functions import get_m
     build_model_from_json
 from collections import defaultdict
 
+
 def get_row_activities(model):
     """
     Compute and return the support, minimal activity, and maximal activity for each row in a Gurobi model.
@@ -197,7 +198,7 @@ def eliminate_zero_rows(model, current_matrices_path):
         model_copy = model.copy()
 
         # Getting the matrices of the model
-        A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(model_copy)
+        A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model_copy)
 
         # Getting the variable names
         variable_names = [var.VarName for var in model_copy.getVars()]
@@ -209,34 +210,25 @@ def eliminate_zero_rows(model, current_matrices_path):
             is_zero_row = all(model_copy.getCoeff(constr, var) == 0 for var in model_copy.getVars())
 
             if is_zero_row:
-                if constr.Sense == GRB.LESS_EQUAL:
-                    if constr.RHS >= 0:
-                        feedback[constr.ConstrName] = 'Redundant'
-                        to_delete.append(i)
-                    else:
-                        feedback[constr.ConstrName] = 'Infeasible'
-                elif constr.Sense == GRB.GREATER_EQUAL:
-                    if constr.RHS <= 0:
-                        feedback[constr.ConstrName] = 'Redundant'
-                        to_delete.append(i)
-                    else:
-                        feedback[constr.ConstrName] = 'Infeasible'
-                elif constr.Sense == GRB.EQUAL:
-                    if constr.RHS == 0:
-                        feedback[constr.ConstrName] = 'Redundant'
-                        to_delete.append(i)
-                    else:
-                        feedback[constr.ConstrName] = 'Infeasible'
+                if constr.RHS <= 0:
+                    feedback[constr.ConstrName] = 'Redundant'
+                    to_delete.append(i)
+                else:
+                    feedback[constr.ConstrName] = 'Infeasible'
             else:
                 feedback[constr.ConstrName] = 'Valid'
 
-        # update A and b excluding the zero-constraints
-        A_new = np.delete(A.A, to_delete, axis=0)
+        # Removing columns of A using the list to_delete
+        A_new = np.delete(A.A, to_delete, axis=0)  # Note: axis=1 for columns
         A = csr_matrix(A_new)
 
-        # Delete elements from b
-        for index in to_delete:
+        # Delete elements from b and the constraint senses
+        # Iterating in reverse order to avoid index shifting issues
+        for index in sorted(to_delete, reverse=True):
             del b[index]
+            del cons_senses[index]
+
+        A, b, cons_senses = remove_rows(A, b, cons_senses, to_delete)
 
         save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
         model_copy = build_model_from_json(current_matrices_path)
@@ -265,7 +257,7 @@ def eliminate_zero_columns(model, current_matrices_path):
     copied_model = model.copy()
 
     # Getting the matrices of the model
-    A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(copied_model)
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(copied_model)
 
     # Getting the variable names
     variable_names = [var.VarName for var in copied_model.getVars()]
@@ -294,8 +286,9 @@ def eliminate_zero_columns(model, current_matrices_path):
     A_new = np.delete(A.A, to_delete, axis=1)  # Delete column
     A = csr_matrix(A_new)
 
-    # Delete elements from c
-    for index in to_delete:
+    # Delete elements from c, variable_names, lb, and ub
+    # Iterating in reverse order to avoid index shifting issues
+    for index in sorted(to_delete, reverse=True):
         del c[index]
         del variable_names[index]
         lb = np.delete(lb, index)
@@ -333,11 +326,7 @@ def eliminate_singleton_equalities(model, current_matrices_path):
         found_singleton = False
 
         # Getting the matrices of the model
-        A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(copied_model)
-
-        # Getting objective function expression
-        of = copied_model.getObjective()
-        co = of.getConstant()
+        A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(copied_model)
 
         # Getting the variable names
         variable_names = [var.VarName for var in copied_model.getVars()]
@@ -430,7 +419,7 @@ def eliminate_doubleton_equalities(model, current_matrices_path):
         found_doubleton = False
 
         # Getting the matrices of the model
-        A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(copied_model)
+        A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(copied_model)
 
         # Getting objective function expression
         of = copied_model.getObjective()
@@ -485,7 +474,7 @@ def eliminate_doubleton_equalities(model, current_matrices_path):
 
             # Update c
             if c[doubleton_column] != 0:
-                c -= c[doubleton_column]*A_new[first_doubleton_index, :]
+                c -= c[doubleton_column] * A_new[first_doubleton_index, :]
             c = c.tolist()
 
             # Update values by eliminating the variable "doubleton_column"
@@ -529,13 +518,13 @@ def eliminate_kton_equalities(model, current_matrices_path, k):
 
     # adjustment on the input data k
     A = model.getA()
-    if k>(A.A.shape[1]-1):
-        k = A.A.shape[1]-1
+    if k > (A.A.shape[1] - 1):
+        k = A.A.shape[1] - 1
 
     # Copy the model to avoid modifying the original
     copied_model = model.copy()
 
-    while k>1:
+    while k > 1:
         copied_model.update()
         # Variable to track if we found a k-ton in the current iteration
         found_kton = True
@@ -545,7 +534,7 @@ def eliminate_kton_equalities(model, current_matrices_path, k):
             found_kton = False
 
             # Getting the matrices of the model
-            A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(copied_model)
+            A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(copied_model)
 
             # # Getting objective function expression
             # of = copied_model.getObjective()
@@ -612,8 +601,8 @@ def eliminate_kton_equalities(model, current_matrices_path, k):
 
                 # Update c
                 if c[kton_column] != 0:
-                    c -= c[kton_column]*A_new[first_kton_index, :]
-                c = c.tolist()
+                    c -= c[kton_column] * A_new[first_kton_index, :]
+                    c = c.tolist()
 
                 # Update values by eliminating the variable "k_column"
                 A_new = np.delete(A_new, kton_column, axis=1)  # Delete column
@@ -629,7 +618,7 @@ def eliminate_kton_equalities(model, current_matrices_path, k):
                 copied_model = build_model_from_json(current_matrices_path)
                 copied_model.update()
             else:
-                k -=1
+                k -= 1
     copied_model.update()
     return copied_model, kton_dict
 
@@ -649,8 +638,11 @@ def eliminate_singleton_inequalities(model, current_matrices_path):
     # Copy the model to avoid modifying the original
     copied_model = model.copy()
 
+    # # get rows activities
+    # SUPP, INF, SUP = get_row_activities(copied_model)
+
     # Getting the matrices of the model
-    A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(copied_model)
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(copied_model)
 
     # Getting the variable names
     variable_names = [var.VarName for var in copied_model.getVars()]
@@ -671,8 +663,11 @@ def eliminate_singleton_inequalities(model, current_matrices_path):
     # singleton_indexes = np.where(valid_rows)[0] if np.any(valid_rows) else None
 
     # Identify zero rows and classify constraints
-    feedback = {}
-    to_delete = []
+    feedback_constraint = {}
+    feedback_variable = {v.VarName: 'valid' for v in copied_model.getVars()}
+
+    to_delete_constraint = []
+    to_delete_variable = []
     for i, constr in enumerate(copied_model.getConstrs()):
         if valid_rows[i]:
 
@@ -689,33 +684,59 @@ def eliminate_singleton_inequalities(model, current_matrices_path):
             k_sense = cons_senses[i]
 
             # Identify the right-hand-side
-            b_k = b[i]
+            b_i = b[i]
+
+            # Identify the lower bound of the variable k
+            l_k = copied_model.getVars()[k_index].lb
 
             if k_sense == '<' or k_sense == '<=':
-                if (A_ik>0) and (b_k<=0):
-                    feedback[i] = 'Infeasible'
-                elif (A_ik<0) and (b_k>=0):
-                    feedback[i] = 'Redundant'
-                    to_delete.append(i)
+                if (A_ik > 0) and (b_i < 0) and (l_k >= 0):
+                    feedback_constraint[i] = 'Infeasible'
+                elif (A_ik < 0) and (b_i > 0) and (l_k >= 0):
+                    feedback_constraint[i] = 'Redundant'
+                    to_delete_constraint.append(i)
+                elif (A_ik > 0) and (b_i == 0) and (l_k >= 0):
+                    feedback_constraint[i] = 'Redundant'
+                    feedback_variable[copied_model.getVars()[k_index].VarName] = 'Redundant'
+                    to_delete_constraint.append(i)
+                    to_delete_variable.append(k_index)
+                elif (A_ik < 0) and (b_i == 0) and (l_k >= 0):
+                    feedback_constraint[i] = 'Redundant'
+                    to_delete_constraint.append(i)
 
             elif k_sense == '>' or k_sense == '>=':
-                if (A_ik>0) and (b_k<=0):
-                    feedback[i] = 'Redundant'
-                    to_delete.append(i)
-                elif (A_ik<0) and (b_k>=0):
-                    feedback[i] = 'Infeasible'
+                if (A_ik > 0) and (b_i < 0) and (l_k >= 0):
+                    feedback_constraint[i] = 'Redundant'
+                    to_delete_constraint.append(i)
+                elif (A_ik < 0) and (b_i >= 0) and (l_k >= 0):
+                    feedback_constraint[i] = 'Infeasible'
+                elif (A_ik > 0) and (b_i == 0) and (l_k >= 0):
+                    feedback_constraint[i] = 'Redundant'
+                elif (A_ik < 0) and (b_i == 0) and (l_k >= 0):
+                    feedback_constraint[i] = 'Redundant'
+                    feedback_variable[copied_model.getVars()[k_index].VarName] = 'Redundant'
+                    to_delete_constraint.append(i)
+                    to_delete_variable.append(k_index)
         else:
-            feedback[i] = 'Valid'
+            feedback_constraint[i] = 'Valid'
 
-    # update A and b excluding the zero-constraints
-    A_new = np.delete(A.A, to_delete, axis=0)
+    # Exclude constraints and variables
+    A_new = np.delete(A.A, to_delete_constraint, axis=0)  # remove constraint (row)
+    A_new = np.delete(A_new, to_delete_variable, axis=1)  # remove variable (column)
     A = csr_matrix(A_new)
 
-    # Delete elements from b
-    for index in to_delete:
+    # Delete elements from b and the corresponding elements of the constraint operation
+    for index in to_delete_constraint:
         del b[index]
+        del cons_senses[index]
+
+    for index in to_delete_variable:
+        del c[index]
+        del lb[index]
+        del ub[index]
+        del variable_names[index]
 
     save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
     model_copy = build_model_from_json(current_matrices_path)
 
-    return model_copy, feedback
+    return model_copy, feedback_constraint, feedback_variable

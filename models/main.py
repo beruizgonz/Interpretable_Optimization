@@ -37,18 +37,18 @@ if __name__ == "__main__":
               "original_primal_canonical": True,
               "quality_check": True,
               "verbose": 0,
-              "print_detail_sol": False,
+              "print_detail_sol": True,
               "save_original_model": {"val": False,
                                       "save_name": 'transp_singleton.mps',
                                       "save_path": 'models_library'},
               "rhs_sensitivity": False,
               "cost_sensitivity": False,
-              "presolve_operations": {"eliminate_zero_rows": False,
+              "presolve_operations": {"eliminate_zero_rows": True,
                                       "eliminate_zero_columns": True,
-                                      "eliminate_singleton_equalities": False,
+                                      "eliminate_singleton_equalities": True,
                                       "eliminate_doubleton_equalities": False,
-                                      "eliminate_kton_equalities": False,
-                                      "eliminate_singleton_inequalities": False},
+                                      "eliminate_kton_equalities": True,
+                                      "eliminate_singleton_inequalities": True},
               "test_sparsification": {"val": False,
                                       "threshold": 0.13},
               "test_constraint_red": {"val": False,
@@ -136,12 +136,12 @@ if __name__ == "__main__":
         log.info(f"{datetime.now()}: Processing Model {index} of {total_models} - {model_name}")
 
         # ============================================ Standardization of the model ====================================
-
         log.info(
             f"{str(datetime.now())}: Standardization of the model...")
-        canonical_model, track_elements = canonical_form(original_primal_bp)
-
-        original_primal = pre_processing_model(original_primal_bp)
+        if config["original_primal_canonical"]:
+            original_primal, track_elements = canonical_form(original_primal_bp, minOption=True)
+        else:
+            original_primal = pre_processing_model(original_primal_bp)
 
         # ======================================= saving the original_primal model in the path =========================
         if config["save_original_model"]["val"]:
@@ -156,12 +156,12 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Accessing matrix A, right-hand side b, cost function c, and the bounds of "
             f"the original model...")
-        A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(original_primal)
+        A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
 
         # ====================================== Saving matrices as json in the path ===================================
         log.info(
             f"{str(datetime.now())}: Saving A, b, c, lb and ub...")
-        save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co)
+        save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
 
         # ============================= Creating the primal and the dual models from json files ========================
         log.info(
@@ -171,7 +171,7 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Creating dual model by loading A, b, c, lb and ub...")
         created_dual = build_dual_model_from_json(current_matrices_path)
-        A_dual, b_dual, c_dual, co_dual, lb_dual, ub_dual, of_sense_dual, cons_senses_dual = get_model_matrices(
+        A_dual, b_dual, c_dual, co_dual, lb_dual, ub_dual, of_sense_dual, cons_senses_dual, variable_names = get_model_matrices(
             created_dual)
 
         # ====================================== Printing model in mathematical format =================================
@@ -183,8 +183,6 @@ if __name__ == "__main__":
             print_model_in_mathematical_format(original_primal_bp)
             print("==================== Original Model after pre-processing ==================== ")
             print_model_in_mathematical_format(original_primal)
-            print("==================== Original Model in canonical form ==================== ")
-            print_model_in_mathematical_format(canonical_model)
             print("==================== Model created from matrices ==================== ")
             print_model_in_mathematical_format(created_primal)
             print("==================== Dual model created from matrices ==================== ")
@@ -217,13 +215,6 @@ if __name__ == "__main__":
         created_primal.setParam('OutputFlag', config['verbose'])
 
         try:
-            canonical_model.optimize()
-            canonical_model_sol = canonical_model.objVal
-        except:
-            print(f"Warning: Optimal solution was not found.")
-            canonical_model_sol = None
-
-        try:
             created_primal.optimize()
             created_primal_sol = created_primal.objVal
         except:
@@ -251,7 +242,7 @@ if __name__ == "__main__":
         log.info(
             f"{str(datetime.now())}: Solving the normalized primal model...")
 
-        A, b, c, co, lb, ub, of_sense, cons_senses = get_model_matrices(original_primal)
+        A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
         A_norm, A_scaler = normalize_features(A)
         b_norm = b / A_scaler
         save_json(A_norm, b_norm, c, lb, ub, of_sense, cons_senses, current_matrices_path)
@@ -261,8 +252,7 @@ if __name__ == "__main__":
 
         # ================================================== Quality check =============================================
         if config['quality_check']:
-            quality_check(original_primal_bp, original_primal, created_primal, created_dual, canonical_model,
-                          track_elements, tolerance=1e-2)
+            quality_check(original_primal_bp, original_primal, created_primal, created_dual, tolerance=1e-2)
             log.info(
                 f"{str(datetime.now())}: Quality check passed...")
 
