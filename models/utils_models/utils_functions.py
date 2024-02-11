@@ -1420,4 +1420,36 @@ def canonical_form(model, minOption=False):
     return canonical_model, track_elements
 
 
+def find_corresponding_negative_rows_with_indices(A, b):
+    """
+    Identify rows in matrix A that have a corresponding negative row and return the indices of such rows.
 
+    Args:
+    A (csr_matrix): The constraint matrix of the linear problem.
+    b (list): The right-hand side values of the constraints.
+
+    Returns:
+    (np.array, list):
+        - A boolean array indicating rows that have a corresponding negative row.
+        - A list of lists with indices of rows that have negative counterparts, or None if there is no counterpart.
+    """
+    rows, cols = A.A.shape
+    has_negative_counterpart = np.zeros(rows, dtype=bool)
+    indices_list = [None] * rows  # Initialize with None
+
+    for i in range(rows):
+        if has_negative_counterpart[i]:  # Skip if already matched
+            continue
+        for j in range(i + 1, rows):  # Avoid comparing the row with itself and repeat comparisons
+            # Check if A[j, :] is the negative of A[i, :] and b[j] is the negative of b[i]
+            if np.allclose(A.A[i, :], -A.A[j, :]) and np.isclose(b[i], -b[j]):
+                has_negative_counterpart[i] = True
+                has_negative_counterpart[j] = True
+                # Store indices of rows that are negatives of each other
+                indices_list[i] = [i, j]
+                indices_list[j] = [i, j]
+
+    # Replace unmodified None with empty lists or keep it as per requirement
+    indices_list = [indices if indices is not None else None for indices in indices_list]
+
+    return has_negative_counterpart, indices_list

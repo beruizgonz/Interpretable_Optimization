@@ -31,13 +31,14 @@ if __name__ == "__main__":
                                "n_variables": 50000,
                                "n_constraints": 4},
               "load_model": {"val": True,
-                             "load_path": 'GAMS_library',
-                             "name": 'TRNSPORT.mps'},
+                             "load_path": 'models_library',
+                             "name": 'transp_singleton.mps'},
               "print_mathematical_format": True,
               "original_primal_canonical": True,
-              "quality_check": True,
+              "solve_models": False,
+              "quality_check": False,
               "verbose": 0,
-              "print_detail_sol": True,
+              "print_detail_sol": False,
               "save_original_model": {"val": False,
                                       "save_name": 'transp_singleton.mps',
                                       "save_path": 'models_library'},
@@ -46,14 +47,14 @@ if __name__ == "__main__":
               "presolve_operations": {"eliminate_zero_rows": True,
                                       "eliminate_zero_columns": True,
                                       "eliminate_singleton_equalities": True,
-                                      "eliminate_doubleton_equalities": False,
+                                      "eliminate_doubleton_equalities": True,
                                       "eliminate_kton_equalities": True,
                                       "eliminate_singleton_inequalities": True},
               "test_sparsification": {"val": False,
                                       "threshold": 0.13},
               "test_constraint_red": {"val": False,
                                       "threshold": 0.8},
-              "sparsification_sa": {"val": True,
+              "sparsification_sa": {"val": False,
                                     "plots": False,
                                     "prints": False,
                                     "max_threshold": 0.3,
@@ -189,48 +190,49 @@ if __name__ == "__main__":
             print_model_in_mathematical_format(created_dual)
 
         # ========== solving all models: original_primal_bp, original_primal, created_primal and created_dual ==========
-        log.info(
-            f"{str(datetime.now())}: Solving the original_primal model (before pre-processing)...")
-        original_primal_bp.setParam('OutputFlag', config['verbose'])
-        try:
-            original_primal_bp.optimize()
-            original_primal_bp_sol = original_primal_bp.objVal
-        except:
-            print(f"Warning: Optimal solution was not found.")
-            original_primal_bp_sol = None
+        if config['solve_models']:
+            log.info(
+                f"{str(datetime.now())}: Solving the original_primal model (before pre-processing)...")
+            original_primal_bp.setParam('OutputFlag', config['verbose'])
+            try:
+                original_primal_bp.optimize()
+                original_primal_bp_sol = original_primal_bp.objVal
+            except:
+                print(f"Warning: Optimal solution was not found.")
+                original_primal_bp_sol = None
 
-        log.info(
-            f"{str(datetime.now())}: Solving the original_primal model (after pre-processing)...")
-        original_primal.setParam('OutputFlag', config['verbose'])
+            log.info(
+                f"{str(datetime.now())}: Solving the original_primal model (after pre-processing)...")
+            original_primal.setParam('OutputFlag', config['verbose'])
 
-        try:
-            original_primal.optimize()
-            original_primal_sol = original_primal.objVal
-        except:
-            print("Warning: Optimal solution was not found.")
-            original_primal_sol = None
+            try:
+                original_primal.optimize()
+                original_primal_sol = original_primal.objVal
+            except:
+                print("Warning: Optimal solution was not found.")
+                original_primal_sol = None
 
-        log.info(
-            f"{str(datetime.now())}: Solving the created_primal model...")
-        created_primal.setParam('OutputFlag', config['verbose'])
+            log.info(
+                f"{str(datetime.now())}: Solving the created_primal model...")
+            created_primal.setParam('OutputFlag', config['verbose'])
 
-        try:
-            created_primal.optimize()
-            created_primal_sol = created_primal.objVal
-        except:
-            print(f"Warning: Optimal solution was not found.")
-            created_primal_sol = None
+            try:
+                created_primal.optimize()
+                created_primal_sol = created_primal.objVal
+            except:
+                print(f"Warning: Optimal solution was not found.")
+                created_primal_sol = None
 
-        log.info(
-            f"{str(datetime.now())}: Solving the created_dual model...")
-        created_dual.setParam('OutputFlag', config['verbose'])
+            log.info(
+                f"{str(datetime.now())}: Solving the created_dual model...")
+            created_dual.setParam('OutputFlag', config['verbose'])
 
-        try:
-            created_dual.optimize()
-            created_dual_sol = created_dual.objVal
-        except:
-            print(f"Warning: Optimal solution was not found.")
-            created_dual_sol = None
+            try:
+                created_dual.optimize()
+                created_dual_sol = created_dual.objVal
+            except:
+                print(f"Warning: Optimal solution was not found.")
+                created_dual_sol = None
 
         # ============================== Comparing solutions: original_primal X created_primal =========================
 
@@ -257,7 +259,7 @@ if __name__ == "__main__":
                 f"{str(datetime.now())}: Quality check passed...")
 
         # =============================================== Presolve operations ==========================================
-        current_model = original_primal_bp.copy()
+        current_model = original_primal.copy()
 
         if config['presolve_operations']['eliminate_zero_rows']:
             log.info(

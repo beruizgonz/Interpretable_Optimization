@@ -2,7 +2,7 @@ import numpy as np
 from gurobipy import GRB
 from scipy.sparse import csr_matrix
 from Interpretable_Optimization.models.utils_models.utils_functions import get_model_matrices, save_json, \
-    build_model_from_json
+    build_model_from_json, find_corresponding_negative_rows_with_indices
 from collections import defaultdict
 
 
@@ -228,8 +228,6 @@ def eliminate_zero_rows(model, current_matrices_path):
             del b[index]
             del cons_senses[index]
 
-        A, b, cons_senses = remove_rows(A, b, cons_senses, to_delete)
-
         save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
         model_copy = build_model_from_json(current_matrices_path)
 
@@ -337,11 +335,10 @@ def eliminate_singleton_equalities(model, current_matrices_path):
         # Create a boolean array where True indicates rows with a single non-zero element
         single_nonzero = nonzero_count_per_row == 1
 
-        # Create a boolean array where True indicates rows with '=' constraint sense
-        equality_constraints = np.array(cons_senses) == '='
+        has_negative_counterpart, indices_list = find_corresponding_negative_rows_with_indices(A, b)
 
-        # Combine the two conditions
-        valid_rows = np.logical_and(single_nonzero, equality_constraints)
+        # Combine the two conditions -> single nonzero + negative counterpart
+        valid_rows = np.logical_and(single_nonzero, has_negative_counterpart)
 
         # Find the index of the first row that satisfies both conditions
         first_singleton_index = np.where(valid_rows)[0][0] if np.any(valid_rows) else None
@@ -352,6 +349,9 @@ def eliminate_singleton_equalities(model, current_matrices_path):
             found_singleton = True
             # Extract the singleton row
             singleton_row = A.A[first_singleton_index, :]
+
+            # identifying rows to delete
+            index_rows_to_delete = indices_list[first_singleton_index]
 
             # Identify the non-zero column (k)
             k_index = np.nonzero(singleton_row)[0][0]
@@ -365,15 +365,20 @@ def eliminate_singleton_equalities(model, current_matrices_path):
 
                 # update b
                 b = b - A.A[:, k_index] * x_k
-                b = np.delete(b, first_singleton_index)
                 b = b.tolist()
+
+                # Delete elements from b and the corresponding elements of the constraint operation
+                # Iterating in reverse order to avoid index shifting issues
+                for index in sorted(index_rows_to_delete, reverse=True):
+                    del b[index]
+                    del cons_senses[index]
 
                 # update objective function constant
                 if c[k_index] != 0:
                     co -= co - c[k_index] * x_k
 
                 # Update A
-                A_new = np.delete(A.A, first_singleton_index, axis=0)  # Delete row
+                A_new = np.delete(A.A, index_rows_to_delete, axis=0)  # Delete rows
                 A_new = np.delete(A_new, k_index, axis=1)  # Delete column
                 A = csr_matrix(A_new)
 
@@ -381,11 +386,11 @@ def eliminate_singleton_equalities(model, current_matrices_path):
                 del c[k_index]
                 lb = np.delete(lb, k_index)
                 ub = np.delete(ub, k_index)
-                del cons_senses[first_singleton_index]
                 del variable_names[k_index]
 
                 save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
                 copied_model = build_model_from_json(current_matrices_path)
+                copied_model.update()
 
             else:
                 # Problem is infeasible
