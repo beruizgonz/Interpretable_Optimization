@@ -2,7 +2,7 @@ import numpy as np
 from gurobipy import GRB
 from scipy.sparse import csr_matrix
 from Interpretable_Optimization.models.utils_models.utils_functions import get_model_matrices, save_json, \
-    build_model_from_json, find_corresponding_negative_rows_with_indices
+    build_model_from_json, find_corresponding_negative_rows_with_indices, canonical_form
 from collections import defaultdict
 
 
@@ -541,9 +541,6 @@ def eliminate_kton_equalities(model, current_matrices_path, k):
             # Getting the matrices of the model
             A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(copied_model)
 
-            # # Getting objective function expression
-            # of = copied_model.getObjective()
-
             # Getting the variable names
             variable_names = [var.VarName for var in copied_model.getVars()]
 
@@ -551,13 +548,12 @@ def eliminate_kton_equalities(model, current_matrices_path, k):
             nonzero_count_per_row = np.count_nonzero(A.A, axis=1)
 
             # Create a boolean array where True indicates rows with k non-zero element
-            single_nonzero = nonzero_count_per_row == k
+            k_nonzero = nonzero_count_per_row == k
 
-            # Create a boolean array where True indicates rows with '=' constraint sense
-            equality_constraints = np.array(cons_senses) == '='
+            has_negative_counterpart, indices_list = find_corresponding_negative_rows_with_indices(A, b)
 
             # Combine the two conditions
-            valid_rows = np.logical_and(single_nonzero, equality_constraints)
+            valid_rows = np.logical_and(k_nonzero, has_negative_counterpart)
 
             # Find indices where the element is True
             true_indices = np.where(valid_rows)[0]
@@ -574,14 +570,17 @@ def eliminate_kton_equalities(model, current_matrices_path, k):
                 # Extract the kton row
                 kton_row = A.A[first_kton_index, :]
 
+                # identifying rows to delete
+                index_rows_to_delete = indices_list[first_kton_index]
+
                 # Identify the index of the last non-zero column (k)
                 kton_column = np.nonzero(kton_row)[0][-1]
 
                 # Save the k-ton constraint details
-                kton_constraint = copied_model.getConstrs()[first_kton_index]
+
                 constraint_key = f"iteration={it}, k-ton={k}"
                 kton_dict[constraint_key] = {
-                    'lfs': kton_row.copy(),
+                    'lhs': kton_row.copy(),
                     'vars': variable_names.copy(),
                     'rhs': b[first_kton_index],
                     'removed_var': variable_names[kton_column]
@@ -601,17 +600,14 @@ def eliminate_kton_equalities(model, current_matrices_path, k):
                         A_new[i, :] -= A_new[i, kton_column] * A_new[first_kton_index, :]
 
                 # Update the objective function
-                if c[kton_column] != 0:
-                    co += c[kton_column] * b[first_kton_index]
+                co += c[kton_column] * b[first_kton_index]
 
                 # Update c
-                if c[kton_column] != 0:
-                    c -= c[kton_column] * A_new[first_kton_index, :]
-                    c = c.tolist()
+                c -= c[kton_column] * A_new[first_kton_index, :]
+                c = c.tolist()
 
                 # Update values by eliminating the variable "k_column"
                 A_new = np.delete(A_new, kton_column, axis=1)  # Delete column
-                A = csr_matrix(A_new)
                 del c[kton_column]
                 lb = np.delete(lb, kton_column)
                 ub = np.delete(ub, kton_column)
@@ -619,8 +615,16 @@ def eliminate_kton_equalities(model, current_matrices_path, k):
 
                 cons_senses[first_kton_index] = '<='
 
+                # Remove the negative counterpart
+                A_new = np.delete(A_new, index_rows_to_delete[-1], axis=0)  # Delete row
+                A = csr_matrix(A_new)
+                del b[index_rows_to_delete[-1]]
+                del cons_senses[index_rows_to_delete[-1]]
+
                 save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
                 copied_model = build_model_from_json(current_matrices_path)
+                copied_model.update()
+                copied_model, track_elements = canonical_form(copied_model, minOption=True)
                 copied_model.update()
             else:
                 k -= 1

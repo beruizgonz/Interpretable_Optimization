@@ -32,7 +32,7 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'models_library',
-                             "name": 'transp_singleton.mps'},
+                             "name": 'doubleton.mps'},
               "print_mathematical_format": True,
               "original_primal_canonical": True,
               "solve_models": False,
@@ -44,10 +44,10 @@ if __name__ == "__main__":
                                       "save_path": 'models_library'},
               "rhs_sensitivity": False,
               "cost_sensitivity": False,
-              "presolve_operations": {"eliminate_zero_rows": True,
-                                      "eliminate_zero_columns": True,
-                                      "eliminate_singleton_equalities": True,
-                                      "eliminate_doubleton_equalities": True,
+              "presolve_operations": {"eliminate_zero_rows": False,
+                                      "eliminate_zero_columns": False,
+                                      "eliminate_singleton_equalities": False,
+                                      "eliminate_doubleton_equalities": False,
                                       "eliminate_kton_equalities": True,
                                       "eliminate_singleton_inequalities": True},
               "test_sparsification": {"val": False,
@@ -294,7 +294,7 @@ if __name__ == "__main__":
                 f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
-            current_model, kton_dict = eliminate_kton_equalities(current_model, current_matrices_path, 3)
+            current_model, kton_dict = eliminate_kton_equalities(current_model, current_matrices_path, 2)
 
         if config['presolve_operations']['eliminate_singleton_inequalities']:
             log.info(
