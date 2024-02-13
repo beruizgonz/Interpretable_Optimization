@@ -662,14 +662,11 @@ def eliminate_singleton_inequalities(model, current_matrices_path):
     # Create a boolean array where True indicates rows with a single non-zero element
     single_nonzero = nonzero_count_per_row == 1
 
-    # Create a boolean array where True indicates rows with inequalities constraint sense
-    inequality_constraints = np.array(cons_senses) != '='
+    has_negative_counterpart, indices_list = find_corresponding_negative_rows_with_indices(A, b)
+    negated_list = [not x for x in has_negative_counterpart]
 
     # Combine the two conditions
-    valid_rows = np.logical_and(single_nonzero, inequality_constraints)
-    #
-    # # Find the index of the rows that satisfies both conditions
-    # singleton_indexes = np.where(valid_rows)[0] if np.any(valid_rows) else None
+    valid_rows = np.logical_and(single_nonzero, negated_list)
 
     # Identify zero rows and classify constraints
     feedback_constraint = {}
@@ -689,45 +686,26 @@ def eliminate_singleton_inequalities(model, current_matrices_path):
             # Identify Aik
             A_ik = singleton_row[k_index]
 
-            # Identify the operation (< or >)
-            k_sense = cons_senses[i]
-
             # Identify the right-hand-side
             b_i = b[i]
 
             # Identify the lower bound of the variable k
             l_k = copied_model.getVars()[k_index].lb
 
-            if k_sense == '<' or k_sense == '<=':
-                if (A_ik > 0) and (b_i < 0) and (l_k >= 0):
-                    feedback_constraint[i] = 'Infeasible'
-                elif (A_ik < 0) and (b_i > 0) and (l_k >= 0):
-                    feedback_constraint[i] = 'Redundant'
-                    to_delete_constraint.append(i)
-                elif (A_ik > 0) and (b_i == 0) and (l_k >= 0):
-                    feedback_constraint[i] = 'Redundant'
-                    feedback_variable[copied_model.getVars()[k_index].VarName] = 'Redundant'
-                    to_delete_constraint.append(i)
-                    to_delete_variable.append(k_index)
-                elif (A_ik < 0) and (b_i == 0) and (l_k >= 0):
-                    feedback_constraint[i] = 'Redundant'
-                    to_delete_constraint.append(i)
-
-            elif k_sense == '>' or k_sense == '>=':
-                if (A_ik > 0) and (b_i < 0) and (l_k >= 0):
-                    feedback_constraint[i] = 'Redundant'
-                    to_delete_constraint.append(i)
-                elif (A_ik < 0) and (b_i >= 0) and (l_k >= 0):
-                    feedback_constraint[i] = 'Infeasible'
-                elif (A_ik > 0) and (b_i == 0) and (l_k >= 0):
-                    feedback_constraint[i] = 'Redundant'
-                elif (A_ik < 0) and (b_i == 0) and (l_k >= 0):
-                    feedback_constraint[i] = 'Redundant'
-                    feedback_variable[copied_model.getVars()[k_index].VarName] = 'Redundant'
-                    to_delete_constraint.append(i)
-                    to_delete_variable.append(k_index)
-        else:
-            feedback_constraint[i] = 'Valid'
+            if (A_ik > 0) and (b_i < 0):
+                feedback_constraint[i] = 'Redundant'
+                to_delete_constraint.append(i)
+            elif (A_ik < 0) and (b_i > 0):
+                feedback_constraint[i] = 'Infeasible'
+            elif (A_ik > 0) and (b_i == 0):
+                feedback_constraint[i] = 'Redundant'
+            elif (A_ik < 0) and (b_i == 0):
+                feedback_constraint[i] = 'Redundant'
+                feedback_variable[copied_model.getVars()[k_index].VarName] = 'Redundant'
+                to_delete_constraint.append(i)
+                to_delete_variable.append(k_index)
+            else:
+                feedback_constraint[i] = 'Valid'
 
     # Exclude constraints and variables
     A_new = np.delete(A.A, to_delete_constraint, axis=0)  # remove constraint (row)

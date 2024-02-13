@@ -294,7 +294,7 @@ if __name__ == "__main__":
                 f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
-            current_model, kton_dict = eliminate_kton_equalities(current_model, current_matrices_path, 2)
+            current_model, kton_dict = eliminate_kton_equalities(current_model, current_matrices_path, 3)
 
         if config['presolve_operations']['eliminate_singleton_inequalities']:
             log.info(
