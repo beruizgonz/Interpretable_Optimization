@@ -720,3 +720,88 @@ def eliminate_singleton_inequalities(model, current_matrices_path):
     model_copy = build_model_from_json(current_matrices_path)
 
     return model_copy, feedback_constraint, feedback_variable
+
+
+def eliminate_dual_singleton_inequalities(model, current_matrices_path):
+    """
+    This function processes a Gurobi model to eliminate dual singleton inequality constraints.
+    It simplifies the model by removing redundant variables and updating the model accordingly.
+
+    Args:
+    model (gurobipy.Model): The Gurobi model to process.
+
+    Returns:
+    gurobipy.Model: The updated Gurobi model after eliminating singleton equalities.
+    """
+
+    # Copy the model to avoid modifying the original
+    copied_model = model.copy()
+
+    # Getting the matrices of the model
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(copied_model)
+
+    # Getting the variable names
+    variable_names = [var.VarName for var in copied_model.getVars()]
+
+    # Getting the number of nonzero elements per column
+    nonzero_count_per_column = np.count_nonzero(A.A, axis=0)
+
+    # Create a boolean array where True indicates rows with a single non-zero element
+    valid_columns = nonzero_count_per_column == 1
+
+    # Identify zero rows and classify constraints
+    feedback_constraint = {i: 'Valid' for i in range(len(copied_model.getConstrs()))}
+    feedback_variable = {v.VarName: 'valid' for v in copied_model.getVars()}
+
+    to_delete_constraint = []
+    to_delete_variable = []
+    for j, var in enumerate(model.getVars()):
+        if valid_columns[j]:
+
+            # Extract the singleton row
+            singleton_column = A.A[:, j]
+
+            # Identify the index of the non-zero column (k)
+            r_index = np.nonzero(singleton_column)[0][0]
+
+            # Identify Aik
+            A_ik = singleton_column[r_index]
+
+            # Identify the cost
+            c_j = c[j]
+
+            if (A_ik > 0) and (c_j < 0):
+                feedback_variable[copied_model.getVars()[j].VarName] = 'Infeasible'
+            elif (A_ik < 0) and (c_j > 0):
+                feedback_variable[copied_model.getVars()[j].VarName] = 'Redundant'
+                to_delete_variable.append(j)
+            elif (A_ik > 0) and (c_j == 0):
+                feedback_variable[copied_model.getVars()[j].VarName] = 'Redundant'
+                to_delete_variable.append(j)
+                feedback_constraint[r_index] = 'Redundant'
+                to_delete_constraint.append(r_index)
+            elif (A_ik < 0) and (c_j == 0):
+                feedback_variable[copied_model.getVars()[j].VarName] = 'Redundant'
+                to_delete_variable.append(j)
+
+    # Exclude constraints and variables
+    A_new = np.delete(A.A, to_delete_constraint, axis=0)  # remove constraint (row)
+    A_new = np.delete(A_new, to_delete_variable, axis=1)  # remove variable (column)
+    A = csr_matrix(A_new)
+
+    # Delete elements from b and the corresponding elements of the constraint operation
+    # Iterating in reverse order to avoid index shifting issues
+    for index in sorted(to_delete_constraint, reverse=True):
+        del b[index]
+        del cons_senses[index]
+
+    for index in sorted(to_delete_variable, reverse=True):
+        del c[index]
+        del lb[index]
+        del ub[index]
+        del variable_names[index]
+
+    save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
+    model_copy = build_model_from_json(current_matrices_path)
+
+    return model_copy, feedback_constraint, feedback_variable

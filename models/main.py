@@ -16,7 +16,7 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
 from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
     feedback_individual_constraints, small_coefficient_reduction, eliminate_zero_columns, \
     eliminate_singleton_equalities, eliminate_zero_rows, eliminate_doubleton_equalities, eliminate_kton_equalities, \
-    eliminate_singleton_inequalities
+    eliminate_singleton_inequalities, eliminate_dual_singleton_inequalities
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -31,14 +31,14 @@ if __name__ == "__main__":
                                "n_variables": 50000,
                                "n_constraints": 4},
               "load_model": {"val": True,
-                             "load_path": 'netlib',
-                             "name": '25fv47.mps'},
-              "print_mathematical_format": True,
-              "original_primal_canonical": True,
-              "solve_models": True,
-              "quality_check": True,
+                             "load_path": 'models_library',
+                             "name": 'single_in.mps'},
+              "print_mathematical_format": False,
+              "original_primal_canonical": False,
+              "solve_models": False,
+              "quality_check": False,
               "verbose": 0,
-              "print_detail_sol": True,
+              "print_detail_sol": False,
               "save_original_model": {"val": False,
                                       "save_name": 'transp_singleton.mps',
                                       "save_path": 'models_library'},
@@ -49,7 +49,8 @@ if __name__ == "__main__":
                                       "eliminate_singleton_equalities": False,
                                       "eliminate_doubleton_equalities": False,
                                       "eliminate_kton_equalities": False,
-                                      "eliminate_singleton_inequalities": True},
+                                      "eliminate_singleton_inequalities": False,
+                                      "eliminate_dual_singleton_inequalities": True},
               "test_sparsification": {"val": False,
                                       "threshold": 0.13},
               "test_constraint_red": {"val": False,
@@ -119,6 +120,7 @@ if __name__ == "__main__":
         else:
             # Single model specified
             model_files = [model_names]
+
 
     # ============================================== Iterative Process =================================================
     def nested_dict():
@@ -301,7 +303,16 @@ if __name__ == "__main__":
                 f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
-            current_model, feedback_constraint_single_in, feedback_variable_single_in = eliminate_singleton_inequalities(current_model, current_matrices_path)
+            current_model, feedback_constraint_single_in, feedback_variable_single_in = eliminate_singleton_inequalities(
+                current_model, current_matrices_path)
+
+        if config['presolve_operations']['eliminate_dual_singleton_inequalities']:
+            log.info(
+                f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
+            current_model.update()
+            print_model_in_mathematical_format(current_model)
+            current_model, feedback_constraint_single_in, feedback_variable_single_in = (
+                eliminate_dual_singleton_inequalities(current_model, current_matrices_path))
 
         current_model.update()
         print_model_in_mathematical_format(current_model)
