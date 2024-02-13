@@ -647,9 +647,6 @@ def eliminate_singleton_inequalities(model, current_matrices_path):
     # Copy the model to avoid modifying the original
     copied_model = model.copy()
 
-    # # get rows activities
-    # SUPP, INF, SUP = get_row_activities(copied_model)
-
     # Getting the matrices of the model
     A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(copied_model)
 
@@ -669,7 +666,7 @@ def eliminate_singleton_inequalities(model, current_matrices_path):
     valid_rows = np.logical_and(single_nonzero, negated_list)
 
     # Identify zero rows and classify constraints
-    feedback_constraint = {}
+    feedback_constraint = {i: 'Valid' for i in range(len(copied_model.getConstrs()))}
     feedback_variable = {v.VarName: 'valid' for v in copied_model.getVars()}
 
     to_delete_constraint = []
@@ -689,9 +686,6 @@ def eliminate_singleton_inequalities(model, current_matrices_path):
             # Identify the right-hand-side
             b_i = b[i]
 
-            # Identify the lower bound of the variable k
-            l_k = copied_model.getVars()[k_index].lb
-
             if (A_ik > 0) and (b_i < 0):
                 feedback_constraint[i] = 'Redundant'
                 to_delete_constraint.append(i)
@@ -704,8 +698,6 @@ def eliminate_singleton_inequalities(model, current_matrices_path):
                 feedback_variable[copied_model.getVars()[k_index].VarName] = 'Redundant'
                 to_delete_constraint.append(i)
                 to_delete_variable.append(k_index)
-            else:
-                feedback_constraint[i] = 'Valid'
 
     # Exclude constraints and variables
     A_new = np.delete(A.A, to_delete_constraint, axis=0)  # remove constraint (row)
@@ -713,11 +705,12 @@ def eliminate_singleton_inequalities(model, current_matrices_path):
     A = csr_matrix(A_new)
 
     # Delete elements from b and the corresponding elements of the constraint operation
-    for index in to_delete_constraint:
+    # Iterating in reverse order to avoid index shifting issues
+    for index in sorted(to_delete_constraint, reverse=True):
         del b[index]
         del cons_senses[index]
 
-    for index in to_delete_variable:
+    for index in sorted(to_delete_variable, reverse=True):
         del c[index]
         del lb[index]
         del ub[index]

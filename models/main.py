@@ -31,14 +31,14 @@ if __name__ == "__main__":
                                "n_variables": 50000,
                                "n_constraints": 4},
               "load_model": {"val": True,
-                             "load_path": 'models_library',
-                             "name": 'doubleton.mps'},
+                             "load_path": 'netlib',
+                             "name": '25fv47.mps'},
               "print_mathematical_format": True,
               "original_primal_canonical": True,
-              "solve_models": False,
-              "quality_check": False,
+              "solve_models": True,
+              "quality_check": True,
               "verbose": 0,
-              "print_detail_sol": False,
+              "print_detail_sol": True,
               "save_original_model": {"val": False,
                                       "save_name": 'transp_singleton.mps',
                                       "save_path": 'models_library'},
@@ -48,7 +48,7 @@ if __name__ == "__main__":
                                       "eliminate_zero_columns": False,
                                       "eliminate_singleton_equalities": False,
                                       "eliminate_doubleton_equalities": False,
-                                      "eliminate_kton_equalities": True,
+                                      "eliminate_kton_equalities": False,
                                       "eliminate_singleton_inequalities": True},
               "test_sparsification": {"val": False,
                                       "threshold": 0.13},
@@ -301,7 +301,7 @@ if __name__ == "__main__":
                 f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
-            current_model, feedback_3 = eliminate_singleton_inequalities(current_model, current_matrices_path)
+            current_model, feedback_constraint_single_in, feedback_variable_single_in = eliminate_singleton_inequalities(current_model, current_matrices_path)
 
         current_model.update()
         print_model_in_mathematical_format(current_model)
