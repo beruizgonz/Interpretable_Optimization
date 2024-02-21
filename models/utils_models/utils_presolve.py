@@ -2,8 +2,9 @@ import numpy as np
 from gurobipy import GRB
 from scipy.sparse import csr_matrix
 from Interpretable_Optimization.models.utils_models.utils_functions import get_model_matrices, save_json, \
-    build_model_from_json, find_corresponding_negative_rows_with_indices, canonical_form
+    build_model_from_json, find_corresponding_negative_rows_with_indices, canonical_form, linear_dependency
 from collections import defaultdict
+import sympy as sp
 
 
 def get_row_activities(model):
@@ -53,7 +54,7 @@ def get_row_activities(model):
     return SUPP, INF, SUP
 
 
-def feedback_individual_constraints(model, feasibility_tolerance=1e-6, infinity=1e30):
+def eliminate_implied_bounds(model, current_matrices_path, feasibility_tolerance=1e-6, infinity=1e30):
     """
     Analyzes each constraint in a Gurobi model and categorizes them as valid, redundant, or infeasible.
 
@@ -66,52 +67,49 @@ def feedback_individual_constraints(model, feasibility_tolerance=1e-6, infinity=
     np.array: A matrix with each row containing the constraint number and its feedback ('valid', 'redundant', 'infeasible').
     """
 
-    # Copy the model
-    model_copy = model.copy()
+    # Copy the model to avoid modifying the original
+    copied_model = model.copy()
 
-    # Transform all '>=' constraints to '<=' in the copied model
-    for constr in model_copy.getConstrs():
-        if constr.Sense == '>':
-            constr.Sense = '<='
-            constr.RHS = -constr.RHS
-            for i, var in enumerate(model_copy.getVars()):
-                coeff = model_copy.getCoeff(constr, var)
-                model_copy.chgCoeff(constr, var, -coeff)
+    # Getting the matrices of the model
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(copied_model)
 
-    model_copy.update()
+    # Getting the variable names
+    variable_names = [var.VarName for var in copied_model.getVars()]
+
     # Get row activities from the model
-    SUPP, INF, SUP = get_row_activities(model_copy)
+    SUPP, INF, SUP = get_row_activities(copied_model)
 
-    feedback_matrix = []
+    feedback_constraint = {i: 'Valid' for i in range(len(copied_model.getConstrs()))}
+    to_delete_constraint = []
 
-    for i, constr in enumerate(model_copy.getConstrs()):
-        # Extracting constraint details
-        sense = constr.Sense
-        rhs = constr.RHS
+    for i, constr in enumerate(copied_model.getConstrs()):
 
-        # Determining the feedback
-        if sense == '<':
-            if rhs >= infinity:
-                feedback = 'redundant'
-            elif SUP[i] <= rhs + feasibility_tolerance:
-                feedback = 'redundant'
-            elif INF[i] > rhs + feasibility_tolerance:
-                feedback = 'infeasible'
-            else:
-                feedback = 'valid'
-        elif sense == '=':
-            if INF[i] >= rhs - feasibility_tolerance and SUP[i] <= rhs + feasibility_tolerance:
-                feedback = 'redundant'
-            elif INF[i] > rhs + feasibility_tolerance or SUP[i] < rhs - feasibility_tolerance:
-                feedback = 'infeasible'
-            else:
-                feedback = 'valid'
-        else:
-            raise ValueError("Unsupported constraint sense: {}".format(sense))
+        if constr.RHS >= infinity:
+            feedback_constraint[i] = 'Redundant'
+            to_delete_constraint.append(i)
 
-        feedback_matrix.append([i, feedback])
+        if INF[i] > (constr.RHS + feasibility_tolerance):
+            feedback_constraint[i] = 'Redundant'
+            to_delete_constraint.append(i)
 
-    return np.array(feedback_matrix)
+        if SUP[i] < (constr.RHS + feasibility_tolerance):
+            feedback_constraint[i] = 'infeasible'
+
+    # Exclude constraints
+    A_new = np.delete(A.A, to_delete_constraint, axis=0)  # remove constraint (row)
+    A = csr_matrix(A_new)
+
+    # Delete elements from b and the corresponding elements of the constraint operation
+    # Iterating in reverse order to avoid index shifting issues
+    for index in sorted(to_delete_constraint, reverse=True):
+        del b[index]
+        del cons_senses[index]
+
+    save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
+    copied_model = build_model_from_json(current_matrices_path)
+    copied_model.update()
+
+    return copied_model, feedback_constraint
 
 
 def small_coefficient_reduction(old_model, feasibility_tolerance=1e-6):
@@ -805,3 +803,147 @@ def eliminate_dual_singleton_inequalities(model, current_matrices_path):
     model_copy = build_model_from_json(current_matrices_path)
 
     return model_copy, feedback_constraint, feedback_variable
+
+
+def eliminate_redundant_columns(model, current_matrices_path):
+    """
+    Eliminates redundant columns and constraints from a linear programming model based on the provided conditions.
+
+    Args:
+        model: The linear programming model object.
+        current_matrices_path: Path to the current matrices of the model for backup purposes.
+
+    Returns:
+        model_copy: A copy of the model with redundant columns and constraints removed.
+        feedback_constraint: List of indices of constraints removed.
+        feedback_variable: List of names of variables removed.
+    """
+    # Copy the model to avoid modifying the original
+    copied_model = model.copy()
+
+    # Getting the matrices of the model
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(copied_model)
+
+    # Getting the variable names
+    variable_names = [var.VarName for var in copied_model.getVars()]
+
+    # Create boolean arrays for each condition
+    b_zero = np.array(b) == 0  # True for rows where b_i = 0
+
+    # For each row, check if all non-zero elements are non-negative or all are non-positive
+    non_negative_elements = np.all(A.A >= 0, axis=1)
+    non_positive_elements = np.all(A.A <= 0, axis=1)
+
+    # boolean for equalities
+    has_negative_counterpart, indices_list = find_corresponding_negative_rows_with_indices(A, b)
+
+    # Combined condition: True for rows where b_i = 0 and all elements are non-negative or all are non-positive
+    combined_condition = b_zero & has_negative_counterpart & (non_negative_elements | non_positive_elements)
+
+    # Identify zero rows and classify constraints
+    feedback_constraint = {i: 'Valid' for i in range(len(copied_model.getConstrs()))}
+    feedback_variable = {v.VarName: 'valid' for v in copied_model.getVars()}
+
+    to_delete_constraint = []
+    to_delete_variable = []
+
+    for i, constr in enumerate(copied_model.getConstrs()):
+        if combined_condition[i]:
+
+            # finding the constraints to remove
+            if i not in to_delete_constraint:
+                to_delete_constraint.append(i)
+                feedback_constraint[i] = 'Redundant'
+
+            # finding nonnull variables on that constraint to remove
+            non_zero_variables = np.nonzero(A.A[i, :])[0]
+            for index in non_zero_variables:
+                if index not in to_delete_variable:
+                    to_delete_variable.append(index)
+                    var_name = copied_model.getVars()[index].VarName
+                    feedback_variable[var_name] = 'Redundant'
+
+    # Exclude constraints and variables
+    A_new = np.delete(A.A, to_delete_constraint, axis=0)  # remove constraint (row)
+    A_new = np.delete(A_new, to_delete_variable, axis=1)  # remove variable (column)
+    A = csr_matrix(A_new)
+
+    # Delete elements from b and the corresponding elements of the constraint operation
+    # Iterating in reverse order to avoid index shifting issues
+    for index in sorted(to_delete_constraint, reverse=True):
+        del b[index]
+        del cons_senses[index]
+
+    lb = np.delete(lb, to_delete_variable)
+    ub = np.delete(ub, to_delete_variable)
+
+    for index in sorted(to_delete_variable, reverse=True):
+        del c[index]
+        del variable_names[index]
+
+    save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
+    copied_model = build_model_from_json(current_matrices_path)
+
+    return copied_model, feedback_constraint, feedback_variable
+
+
+def eliminate_redundant_rows(model, current_matrices_path):
+    """
+    Eliminates redundant rows from a linear programming model's constraints matrix.
+
+    This function copies the input model to avoid modifying the original, identifies redundant
+    constraints using Gaussian elimination with partial pivoting, and updates the model by removing
+    these constraints. It then saves the updated model matrices to a specified path and rebuilds the
+    model from these matrices.
+
+    Parameters:
+    - model: The linear programming model to be processed.
+    - current_matrices_path: Path to save the updated model matrices.
+
+    Returns:
+    - copied_model: The updated model with redundant rows removed.
+    - feedback_constraint: A dictionary with feedback on each constraint (valid, redundant, infeasible).
+    """
+
+    # Copy the model to avoid modifying the original
+    copied_model = model.copy()
+
+    # Getting the matrices of the model
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(copied_model)
+
+    dependent_rows, has_linear_dependency = linear_dependency(A)
+
+    # boolean for equalities
+    has_negative_counterpart, indices_list = find_corresponding_negative_rows_with_indices(A, b)
+
+    # Initialize feedback dictionaries and deletion list
+    feedback_constraint = {i: 'Valid' for i in range(len(cons_senses))}
+    to_delete_constraint = []
+
+    # Iterate over the constraints
+    for i, constr in enumerate(copied_model.getConstrs()):
+        if i not in to_delete_constraint:
+            if has_linear_dependency[i]:
+                list_of_dependencies = dependent_rows[i]
+                negative_counterpart_index = indices_list[i]
+                for j in list_of_dependencies:
+                    if j != negative_counterpart_index:
+                        if j not in to_delete_constraint:
+                            feedback_constraint[i] = 'Redundant'
+                            to_delete_constraint.append(j)
+
+    # Exclude constraints
+    A_new = np.delete(A.A, to_delete_constraint, axis=0)  # remove constraint (row)
+    A = csr_matrix(A_new)
+
+    # Delete elements from b and the corresponding elements of the constraint senses
+    for index in sorted(to_delete_constraint, reverse=True):
+        del b[index]
+        del cons_senses[index]
+
+    # Save updated matrices and rebuild the model
+    save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
+    copied_model = build_model_from_json(current_matrices_path)
+    copied_model.update()
+
+    return copied_model, feedback_constraint

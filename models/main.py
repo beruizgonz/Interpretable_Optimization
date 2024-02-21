@@ -14,9 +14,10 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json, canonical_form
 
 from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
-    feedback_individual_constraints, small_coefficient_reduction, eliminate_zero_columns, \
+    eliminate_implied_bounds, small_coefficient_reduction, eliminate_zero_columns, \
     eliminate_singleton_equalities, eliminate_zero_rows, eliminate_doubleton_equalities, eliminate_kton_equalities, \
-    eliminate_singleton_inequalities, eliminate_dual_singleton_inequalities
+    eliminate_singleton_inequalities, eliminate_dual_singleton_inequalities, eliminate_redundant_columns, \
+    eliminate_redundant_rows
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -31,10 +32,10 @@ if __name__ == "__main__":
                                "n_variables": 50000,
                                "n_constraints": 4},
               "load_model": {"val": True,
-                             "load_path": 'models_library',
-                             "name": 'single_in.mps'},
+                             "load_path": 'presolve',
+                             "name": 'redundant_rows.mps'},
               "print_mathematical_format": False,
-              "original_primal_canonical": False,
+              "original_primal_canonical": True,
               "solve_models": False,
               "quality_check": False,
               "verbose": 0,
@@ -50,7 +51,10 @@ if __name__ == "__main__":
                                       "eliminate_doubleton_equalities": False,
                                       "eliminate_kton_equalities": False,
                                       "eliminate_singleton_inequalities": False,
-                                      "eliminate_dual_singleton_inequalities": True},
+                                      "eliminate_dual_singleton_inequalities": False,
+                                      "eliminate_redundant_columns": False,
+                                      "eliminate_redundant_rows": False,
+                                      "eliminate_implied_bounds": True},
               "test_sparsification": {"val": False,
                                       "threshold": 0.13},
               "test_constraint_red": {"val": False,
@@ -265,20 +269,20 @@ if __name__ == "__main__":
 
         if config['presolve_operations']['eliminate_zero_rows']:
             log.info(
-                f"{str(datetime.now())}: Presolve operations - eliminate_zero_rows")
+                f"{str(datetime.now())}: Presolve operations - eliminate zero rows")
             print_model_in_mathematical_format(current_model)
             current_model, feedback_zero_rows = eliminate_zero_rows(current_model, current_matrices_path)
 
         if config['presolve_operations']['eliminate_zero_columns']:
             log.info(
-                f"{str(datetime.now())}: Presolve operations - eliminate_zero_columns")
+                f"{str(datetime.now())}: Presolve operations - eliminate zero columns")
             current_model.update()
             print_model_in_mathematical_format(current_model)
             current_model, feedback_zero_columns = eliminate_zero_columns(current_model, current_matrices_path)
 
         if config['presolve_operations']['eliminate_singleton_equalities']:
             log.info(
-                f"{str(datetime.now())}: Presolve operations - eliminate_singleton_equalities")
+                f"{str(datetime.now())}: Presolve operations - eliminate singleton equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
             current_model, solution_singleton_equalities = eliminate_singleton_equalities(current_model,
@@ -286,21 +290,21 @@ if __name__ == "__main__":
 
         if config['presolve_operations']['eliminate_doubleton_equalities']:
             log.info(
-                f"{str(datetime.now())}: Presolve operations - eliminate_doubleton_equalities")
+                f"{str(datetime.now())}: Presolve operations - eliminate doubleton equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
             current_model = eliminate_doubleton_equalities(current_model, current_matrices_path)
 
         if config['presolve_operations']['eliminate_kton_equalities']:
             log.info(
-                f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
+                f"{str(datetime.now())}: Presolve operations - eliminate kton equalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
             current_model, kton_dict = eliminate_kton_equalities(current_model, current_matrices_path, 3)
 
         if config['presolve_operations']['eliminate_singleton_inequalities']:
             log.info(
-                f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
+                f"{str(datetime.now())}: Presolve operations - eliminate singleton inequalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
             current_model, feedback_constraint_single_in, feedback_variable_single_in = eliminate_singleton_inequalities(
@@ -308,14 +312,34 @@ if __name__ == "__main__":
 
         if config['presolve_operations']['eliminate_dual_singleton_inequalities']:
             log.info(
-                f"{str(datetime.now())}: Presolve operations - eliminate_kton_equalities")
+                f"{str(datetime.now())}: Presolve operations - eliminate dual singleton inequalities")
             current_model.update()
             print_model_in_mathematical_format(current_model)
             current_model, feedback_constraint_single_in, feedback_variable_single_in = (
                 eliminate_dual_singleton_inequalities(current_model, current_matrices_path))
 
-        current_model.update()
-        print_model_in_mathematical_format(current_model)
+        if config['presolve_operations']['eliminate_redundant_columns']:
+            log.info(
+                f"{str(datetime.now())}: Presolve operations - eliminate redundant columns")
+            current_model.update()
+            print_model_in_mathematical_format(current_model)
+            current_model, feedback_constraint_red_col, feedback_variable_red_col = (
+                eliminate_redundant_columns(current_model, current_matrices_path))
+
+        if config['presolve_operations']['eliminate_redundant_rows']:
+            log.info(
+                f"{str(datetime.now())}: Presolve operations - eliminate redundant rows")
+            current_model.update()
+            print_model_in_mathematical_format(current_model)
+            current_model, feedback_constraint = eliminate_redundant_rows(current_model, current_matrices_path)
+
+        if config['presolve_operations']['eliminate_implied_bounds']:
+            log.info(
+                f"{str(datetime.now())}: Presolve operations - eliminate implied bounds")
+            current_model.update()
+            print_model_in_mathematical_format(current_model)
+            current_model, feedback_constraint = eliminate_implied_bounds(current_model, current_matrices_path)
+
 
         # fd_var = eliminate_zero_columns(original_primal_bp)
         # SUPP, INF, SUP = get_row_activities(original_primal_bp)

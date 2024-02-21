@@ -7,13 +7,11 @@ import numpy as np
 import pandas as pd
 from gurobipy import LinExpr
 import plotly.graph_objects as go
-from plotly.subplots import make_subplots
 from tabulate import tabulate
 import time
 import sys
 from gurobipy import GRB
-from scipy.sparse import csr_matrix
-
+from scipy.sparse import issparse
 
 def create_original_model(n_variables, n_constraints):
     """
@@ -1410,8 +1408,6 @@ def canonical_form(model, minOption=False):
 
             canonical_model.remove(var)
             track_elements['variables'][var.VarName] = 'removed'
-            # track_elements['variables'][f"{var.VarName}_pos"] = 'created'
-            # track_elements['variables'][f"{var.VarName}_neg"] = 'created'
             track_elements['variables'][f"{var.VarName}_pos"] = {'type': 'created', 'original_var': var.VarName}
             track_elements['variables'][f"{var.VarName}_neg"] = {'type': 'created', 'original_var': var.VarName}
 
@@ -1446,10 +1442,61 @@ def find_corresponding_negative_rows_with_indices(A, b):
                 has_negative_counterpart[i] = True
                 has_negative_counterpart[j] = True
                 # Store indices of rows that are negatives of each other
-                indices_list[i] = [i, j]
-                indices_list[j] = [i, j]
+                indices_list[i] = j
+                indices_list[j] = i
 
     # Replace unmodified None with empty lists or keep it as per requirement
     indices_list = [indices if indices is not None else None for indices in indices_list]
 
     return has_negative_counterpart, indices_list
+
+
+def linear_dependency(A, feasibility_tolerance=0.01):
+    """
+    This function checks for linear dependency among the rows of matrix A.
+
+    Linear dependency is checked through division of corresponding row elements.
+    If the division of any corresponding row elements across two rows has very little variation,
+    it indicates a row is linearly dependent on the other.
+
+    Parameters:
+    - A: numpy.ndarray or scipy sparse matrix, matrix of coefficients of the linear constraints.
+    - feasibility_tolerance: float, the tolerance limit under which two constrained row values
+                             are considered the same (indicating low variety, hence, dependence).
+
+    Returns:
+    - vector_index: list of tuple, the recorded pairs of indices of rows that were compared
+                    and found to have equal implications of each other's space.
+    - any_dependency: bool, True if there is at least one set of rows in A that are
+                      linearly dependent within the threshold; False otherwise.
+    """
+
+    # Convert sparse matrix to dense if necessary.
+    if issparse(A):
+        A = A.toarray()
+
+    m, n = A.shape
+    dependent_rows = [[] for _ in range(m)]  # Initialize with empty lists
+    has_linear_dependency = np.zeros(m, dtype=bool)
+
+    for i in range(m):
+        for j in range(i + 1, m):
+            with np.errstate(divide='ignore', invalid='ignore'):
+                # Perform row element division, safety check for division by 0
+                is_nonzero = (A[j, :] != 0)
+                div = np.where(is_nonzero, A[i, :] / A[j, :], np.inf)
+                div_filtered = div[np.isfinite(div)]
+
+                if len(div_filtered) > 0:
+                    # Choose an element with a real value for comparison
+                    div_with_value = div_filtered[0]
+                    # Check if the differences are within the tolerance
+                    close_enough = np.all(np.abs(div_filtered - div_with_value) < feasibility_tolerance)
+                    if close_enough:
+                        has_linear_dependency[i] = True
+                        dependent_rows[i].append(j)
+                        dependent_rows[j].append(i)
+
+    return dependent_rows, has_linear_dependency
+
+
