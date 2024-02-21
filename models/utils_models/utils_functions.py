@@ -12,6 +12,22 @@ import time
 import sys
 from gurobipy import GRB
 from scipy.sparse import issparse
+from collections import defaultdict
+
+
+def nested_dict():
+    """
+    Create a nested defaultdict.
+
+    This function returns a nested defaultdict, which is a dictionary that allows an arbitrary number of levels
+    of nesting. It simplifies the process of creating and working with nested dictionaries by automatically
+    creating inner dictionaries as needed.
+
+    Returns:
+    - defaultdict: A nested defaultdict object that allows arbitrary levels of nesting.
+    """
+    return defaultdict(nested_dict)
+
 
 def create_original_model(n_variables, n_constraints):
     """
@@ -172,7 +188,8 @@ def build_model_from_json(data_path):
     """
 
     # Define the file names for JSON files
-    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json', 'co.json', 'variable_names.json']
+    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json', 'co.json',
+                  'variable_names.json']
 
     # Initialize data variables
     A, b, c, lb, ub, of_sense, cons_senses, co, variable_names = None, None, None, None, None, None, None, None, None
@@ -1500,3 +1517,17 @@ def linear_dependency(A, feasibility_tolerance=0.01):
     return dependent_rows, has_linear_dependency
 
 
+def model_stats(model):
+    """
+    Calculates the number of variables and constraints in a Gurobi model.
+
+    Parameters:
+    - model: Gurobi Model object, the optimization model from which to calculate the stats.
+
+    Returns:
+    - n_var: int, the number of variables in the model.
+    - n_const: int, the number of constraints in the model.
+    """
+    n_var = model.numVars
+    n_const = model.numConstrs
+    return n_var, n_const

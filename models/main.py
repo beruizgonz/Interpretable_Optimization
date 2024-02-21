@@ -3,15 +3,17 @@ import os
 import gurobipy as gp
 import logging
 import sys
-from collections import defaultdict
+
 from datetime import datetime
+
+from Interpretable_Optimization.models.utils_models.presolve_class import PresolveComillas
 from Interpretable_Optimization.models.utils_models.utils_functions import create_original_model, get_model_matrices, \
     save_json, build_model_from_json, compare_models, normalize_features, matrix_sparsification, \
     sparsification_sensitivity_analysis, build_dual_model_from_json, \
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \
     print_model_in_mathematical_format, visual_join_sensitivity, \
     measuring_constraint_infeasibility, quality_check, sparsification_test, constraint_reduction_test, get_info_GAMS, \
-    detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json, canonical_form
+    detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json, canonical_form, nested_dict
 
 from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
     eliminate_implied_bounds, small_coefficient_reduction, eliminate_zero_columns, \
@@ -33,7 +35,7 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'presolve',
-                             "name": 'redundant_rows.mps'},
+                             "name": 'transp_singleton'},
               "print_mathematical_format": False,
               "original_primal_canonical": True,
               "solve_models": False,
@@ -127,11 +129,8 @@ if __name__ == "__main__":
 
 
     # ============================================== Iterative Process =================================================
-    def nested_dict():
-        return defaultdict(nested_dict)
 
-
-    sparsification_results = defaultdict(nested_dict)
+    sparsification_results = nested_dict()
     total_models = len(model_files)
 
     for index, model_file in enumerate(model_files, start=1):
@@ -266,6 +265,22 @@ if __name__ == "__main__":
 
         # =============================================== Presolve operations ==========================================
         current_model = original_primal.copy()
+        print_model_in_mathematical_format(current_model)
+        presolve_instance = PresolveComillas(model=current_model,
+                                             perform_eliminate_zero_rows=False,
+                                             perform_eliminate_zero_columns=False,
+                                             perform_eliminate_singleton_equalities=False,
+                                             perform_eliminate_kton_equalities=False,
+                                             k=2,
+                                             perform_eliminate_singleton_inequalities=True)
+
+        A, b, c, lb, ub, of_sense, cons_senses, co, variable_names, changes_dictionary, operation_table = (
+            presolve_instance.orchestrator_presolve_operations())
+
+        save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
+        current_model = build_model_from_json(current_matrices_path)
+        current_model.update()
+        print_model_in_mathematical_format(current_model)
 
         if config['presolve_operations']['eliminate_zero_rows']:
             log.info(
@@ -340,13 +355,12 @@ if __name__ == "__main__":
             print_model_in_mathematical_format(current_model)
             current_model, feedback_constraint = eliminate_implied_bounds(current_model, current_matrices_path)
 
-
-        # fd_var = eliminate_zero_columns(original_primal_bp)
-        # SUPP, INF, SUP = get_row_activities(original_primal_bp)
-        #
-        # feedback_matrix = feedback_individual_constraints(original_primal_bp)
-        #
-        # new_model, changes = small_coefficient_reduction(original_primal_bp)
+        if config['presolve_operations']['small_coefficient_reduction']:
+            log.info(
+                f"{str(datetime.now())}: Presolve operations - small coefficient reduction")
+            current_model.update()
+            print_model_in_mathematical_format(current_model)
+            current_model, changes = small_coefficient_reduction(current_model)
 
         # ============================================ rhs sensitivity analysis ========================================
         if config['rhs_sensitivity']:
