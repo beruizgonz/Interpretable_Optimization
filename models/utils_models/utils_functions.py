@@ -1468,7 +1468,7 @@ def find_corresponding_negative_rows_with_indices(A, b):
     return has_negative_counterpart, indices_list
 
 
-def linear_dependency(A, feasibility_tolerance=0.01):
+def linear_dependency(A, b, feasibility_tolerance=0.01):
     """
     This function checks for linear dependency among the rows of matrix A.
 
@@ -1492,27 +1492,34 @@ def linear_dependency(A, feasibility_tolerance=0.01):
     if issparse(A):
         A = A.toarray()
 
+    # Convert b to a column vector
+    b_column = np.array(b).reshape((-1, 1))
+
+    # Stack A and b_column horizontally
+    A = np.hstack((A, b_column))
+
     m, n = A.shape
     dependent_rows = [[] for _ in range(m)]  # Initialize with empty lists
     has_linear_dependency = np.zeros(m, dtype=bool)
-
+    A_bool = A != 0
     for i in range(m):
         for j in range(i + 1, m):
             with np.errstate(divide='ignore', invalid='ignore'):
-                # Perform row element division, safety check for division by 0
-                is_nonzero = (A[j, :] != 0)
-                div = np.where(is_nonzero, A[i, :] / A[j, :], np.inf)
-                div_filtered = div[np.isfinite(div)]
+                same_non_zero = np.array_equal(A_bool[i], A_bool[j])
+                if same_non_zero:
+                    is_nonzero = (A[j, :] != 0)
+                    div = np.where(is_nonzero, A[i, :] / A[j, :], np.inf)
+                    div_filtered = div[np.isfinite(div)]
 
-                if len(div_filtered) > 0:
-                    # Choose an element with a real value for comparison
-                    div_with_value = div_filtered[0]
-                    # Check if the differences are within the tolerance
-                    close_enough = np.all(np.abs(div_filtered - div_with_value) < feasibility_tolerance)
-                    if close_enough:
-                        has_linear_dependency[i] = True
-                        dependent_rows[i].append(j)
-                        dependent_rows[j].append(i)
+                    if len(div_filtered) > 0:
+                        # Choose an element with a real value for comparison
+                        div_with_value = div_filtered[0]
+                        # Check if the differences are within the tolerance
+                        close_enough = np.all(np.abs(div_filtered - div_with_value) < feasibility_tolerance)
+                        if close_enough:
+                            has_linear_dependency[i] = True
+                            dependent_rows[i].append(j)
+                            dependent_rows[j].append(i)
 
     return dependent_rows, has_linear_dependency
 

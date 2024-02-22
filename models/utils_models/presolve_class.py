@@ -1,8 +1,7 @@
-from Interpretable_Optimization.models.utils_models.utils_functions import get_model_matrices
 import numpy as np
 from scipy.sparse import csr_matrix
-from Interpretable_Optimization.models.utils_models.utils_functions import get_model_matrices, save_json, \
-    build_model_from_json, find_corresponding_negative_rows_with_indices, canonical_form, linear_dependency, nested_dict
+from Interpretable_Optimization.models.utils_models.utils_functions import get_model_matrices, \
+    find_corresponding_negative_rows_with_indices, nested_dict, linear_dependency
 from collections import defaultdict
 import warnings
 
@@ -15,7 +14,11 @@ class PresolveComillas:
                  perform_eliminate_singleton_equalities=False,
                  perform_eliminate_kton_equalities=False,
                  k = 5,
-                 perform_eliminate_singleton_inequalities=False):
+                 perform_eliminate_singleton_inequalities=False,
+                 perform_eliminate_dual_singleton_inequalities=False,
+                 perform_eliminate_redundant_columns=False,
+                 perform_eliminate_implied_bounds=False,
+                 perform_eliminate_redundant_rows=False):
         """
         Initialize the presolve operations class with an optional optimization model.
 
@@ -34,6 +37,10 @@ class PresolveComillas:
         self.perform_eliminate_singleton_equalities = perform_eliminate_singleton_equalities
         self.perform_eliminate_kton_equalities = perform_eliminate_kton_equalities
         self.perform_eliminate_singleton_inequalities = perform_eliminate_singleton_inequalities
+        self.perform_eliminate_dual_singleton_inequalities = perform_eliminate_dual_singleton_inequalities
+        self.perform_eliminate_redundant_columns = perform_eliminate_redundant_columns
+        self.perform_eliminate_implied_bounds = perform_eliminate_implied_bounds
+        self.perform_eliminate_redundant_rows = perform_eliminate_redundant_rows
 
         # Initialize placeholders for matrices and model components
         self.A = None
@@ -80,6 +87,12 @@ class PresolveComillas:
         # Ensure matrices are loaded
         self.load_model_matrices()
 
+        if self.perform_eliminate_implied_bounds:
+            self.eliminate_implied_bounds()
+
+        if self.perform_eliminate_redundant_rows:
+            self.eliminate_redundant_rows()
+
         if self.perform_eliminate_kton_equalities:
             self.eliminate_kton_equalities()
 
@@ -89,6 +102,12 @@ class PresolveComillas:
         if self.perform_eliminate_singleton_inequalities:
             self.eliminate_singleton_inequalities()
 
+        if self.perform_eliminate_dual_singleton_inequalities:
+            self.eliminate_dual_singleton_inequalities()
+
+        if self.perform_eliminate_redundant_columns:
+            self.eliminate_redundant_columns()
+
         if self.perform_eliminate_zero_rows:
             self.eliminate_zero_rows()
 
@@ -97,6 +116,49 @@ class PresolveComillas:
 
         return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
                 self.change_dictionary, self.operation_table)
+
+    def get_row_activities(self):
+        """
+        Compute and return the support, minimal activity, and maximal activity for each row in a Gurobi model.
+        Returns:
+        support, min_activity, max_activity.
+        SUPP - support: Set of indices j where a_ij is non-zero.
+        INF - min_activity: Infimum of the row activity calculated as the sum of a_ij*l_j (for a_ij > 0) and a_ij*u_j (for a_ij < 0).
+        SUP - max_activity: Supremum of the row activity calculated as the sum of a_ij*u_j (for a_ij > 0) and a_ij*l_j (for a_ij < 0).
+        """
+
+        # Initial values
+        SUPP = []
+        SUP = []
+        INF = []
+
+        num_rows, num_cols = self.A.A.shape
+
+        for i in range(num_rows):
+            support = set()
+            min_activity = 0
+            max_activity = 0
+
+            for j in range(num_cols):
+                a_ij = self.A.A[i, j]
+                l_j = self.lb[j]
+                u_j = self.ub[j]
+
+                if a_ij != 0:
+                    support.add(j)
+
+                    if a_ij > 0:
+                        min_activity += a_ij * l_j
+                        max_activity += a_ij * u_j
+                    else:
+                        min_activity += a_ij * u_j
+                        max_activity += a_ij * l_j
+
+            SUPP.append(support)
+            INF.append(min_activity)
+            SUP.append(max_activity)
+
+        return SUPP, INF, SUP
 
     def eliminate_zero_rows(self):
         """
@@ -464,3 +526,245 @@ class PresolveComillas:
         # Update operation table with the number of variables and constraints after this operation
         self.operation_table.append(
             ("Eliminate Singleton Inequalities", len(self.variable_names), len(self.cons_senses)))
+
+    def eliminate_dual_singleton_inequalities(self):
+        """
+        This function processes a Gurobi model to eliminate dual singleton inequality constraints.
+        It simplifies the model by removing redundant variables and updating the model accordingly.
+        """
+
+        # Getting the number of nonzero elements per column
+        nonzero_count_per_column = np.count_nonzero(self.A.A, axis=0)
+
+        # Create a boolean array where True indicates rows with a single non-zero element
+        valid_columns = nonzero_count_per_column == 1
+
+        num_rows, num_cols = self.A.A.shape
+
+        to_delete_constraint = []
+        to_delete_variable = []
+
+        to_delete_constraint_original = []
+        to_delete_variable_original = []
+
+        for j in range(num_cols):
+            if valid_columns[j]:
+
+                # Extract the singleton row
+                singleton_column = self.A.A[:, j]
+
+                # Identify the index row of the non-zero column (k)
+                r_index = np.nonzero(singleton_column)[0][0]
+
+                # Identify Aik
+                A_ik = singleton_column[r_index]
+
+                # Identify the cost
+                c_j = self.c[j]
+
+                if (A_ik > 0) and (c_j < 0):
+                    warnings.warn("Model is infeasible due to a positive singleton column with a negative cost.",
+                                  RuntimeWarning)
+                elif (A_ik < 0) and (c_j > 0):
+                    to_delete_variable.append(j)
+                    to_delete_variable_original.append(self.original_column_index[j])
+                elif (A_ik > 0) and (c_j == 0):
+                    to_delete_variable.append(j)
+                    to_delete_variable_original.append(self.original_column_index[j])
+                    to_delete_constraint.append(r_index)
+                    to_delete_constraint_original.append(self.original_row_index[r_index])
+                elif (A_ik < 0) and (c_j == 0):
+                    to_delete_variable.append(j)
+                    to_delete_variable_original.append(self.original_column_index[j])
+
+        # Exclude constraints and variables
+        self.A = csr_matrix(np.delete(self.A.toarray(), to_delete_constraint, axis=0))
+        self.A = csr_matrix(np.delete(self.A.toarray(), to_delete_variable, axis=1))
+
+        # Delete elements from b and the corresponding elements of the constraint operation
+        # Iterating in reverse order to avoid index shifting issues
+        for index in sorted(to_delete_constraint, reverse=True):
+            del self.b[index]
+            del self.cons_senses[index]
+            del self.original_row_index[index]
+
+        for index in sorted(to_delete_variable, reverse=True):
+            del self.c[index]
+            del self.variable_names[index]
+            del self.original_column_index[index]
+
+        self.lb = np.delete(self.lb, to_delete_variable)
+        self.ub = np.delete(self.ub, to_delete_variable)
+
+        # Update change_dictionary with the information about deleted elements
+        self.change_dictionary['eliminate_dual_singleton_inequalities']['deleted_variables_indices'] \
+            = to_delete_variable_original
+        self.change_dictionary['eliminate_dual_singleton_inequalities']['deleted_rows_indices'] = (
+            to_delete_constraint_original)
+
+        # Update operation table with the number of variables and constraints after this operation
+        self.operation_table.append(
+            ("Eliminate Dual Singleton Inequalities", len(self.variable_names), len(self.cons_senses)))
+
+    def eliminate_redundant_columns(self):
+        """
+        Eliminates redundant columns and constraints from a linear programming model based on the provided conditions.
+        """
+
+        # Create boolean arrays for each condition
+        b_zero = np.array(self.b) == 0  # True for rows where b_i = 0
+
+        # For each row, check if all non-zero elements are non-negative or all are non-positive
+        non_negative_elements = np.all(self.A.A >= 0, axis=1)
+        non_positive_elements = np.all(self.A.A <= 0, axis=1)
+
+        # boolean for equalities
+        has_negative_counterpart, indices_list = find_corresponding_negative_rows_with_indices(self.A, self.b)
+
+        # Combined condition: True for rows where b_i = 0 and all elements are non-negative or all are non-positive
+        combined_condition = b_zero & has_negative_counterpart & (non_negative_elements | non_positive_elements)
+
+        to_delete_constraint = []
+        to_delete_variable = []
+
+        to_delete_constraint_original = []
+        to_delete_variable_original = []
+
+        num_rows, num_cols = self.A.A.shape
+
+        for i in range(num_rows):
+            if combined_condition[i]:
+                # finding the constraints to remove
+                if i not in to_delete_constraint:
+                    to_delete_constraint.append(i)
+                    to_delete_constraint_original.append(self.original_row_index[i])
+
+                # finding nonnull variables on that constraint to remove
+                non_zero_variables = np.nonzero(self.A.A[i, :])[0]
+                for index in non_zero_variables:
+                    if index not in to_delete_variable:
+                        to_delete_variable.append(index)
+                        to_delete_variable_original.append(self.original_column_index[index])
+
+        # Exclude constraints and variables
+        self.A = csr_matrix(np.delete(self.A.toarray(), to_delete_constraint, axis=0))
+        self.A = csr_matrix(np.delete(self.A.toarray(), to_delete_variable, axis=1))
+
+        # Delete elements from b and the corresponding elements of the constraint operation
+        # Iterating in reverse order to avoid index shifting issues
+        for index in sorted(to_delete_constraint, reverse=True):
+            del self.b[index]
+            del self.cons_senses[index]
+            del self.original_row_index[index]
+
+        self.lb = np.delete(self.lb, to_delete_variable)
+        self.ub = np.delete(self.ub, to_delete_variable)
+
+        for index in sorted(to_delete_variable, reverse=True):
+            del self.c[index]
+            del self.variable_names[index]
+            del self.original_column_index[index]
+
+        # Update change_dictionary with the information about deleted elements
+        self.change_dictionary['eliminate_redundant_columns']['deleted_variables_indices'] \
+            = to_delete_variable_original
+        self.change_dictionary['eliminate_redundant_columns']['deleted_rows_indices'] = (
+            to_delete_constraint_original)
+
+        # Update operation table with the number of variables and constraints after this operation
+        self.operation_table.append(
+            ("Eliminate Redundant Columns", len(self.variable_names), len(self.cons_senses)))
+
+    def eliminate_implied_bounds(self, feasibility_tolerance=1e-6, infinity=1e30):
+        """
+        Analyzes each constraint in a Gurobi model and categorizes them as valid, redundant, or infeasible.
+
+        Parameters:
+        feasibility_tolerance (float, optional): Tolerance used to assess feasibility. Defaults to 1e-6.
+        infinity (float, optional): Value representing infinity in the context of the model. Defaults to 1e30.
+        """
+
+        # Get row activities from the model
+        SUPP, INF, SUP = self.get_row_activities()
+
+        to_delete_constraint = []
+        to_delete_constraint_original = []
+
+        num_rows, num_cols = self.A.A.shape
+
+        for i in range(num_rows):
+
+            if self.b[i] >= infinity:
+                to_delete_constraint.append(i)
+                to_delete_constraint_original.append(self.original_row_index[i])
+
+            if INF[i] > (self.b[i] + feasibility_tolerance):
+                to_delete_constraint.append(i)
+                to_delete_constraint_original.append(self.original_row_index[i])
+
+            if SUP[i] < (self.b[i] + feasibility_tolerance):
+                warnings.warn(f"Model is infeasible: The superior of the constraint {i} is inferior to its RHS.",
+                              RuntimeWarning)
+
+        # Exclude constraints
+        self.A = csr_matrix(np.delete(self.A.toarray(), to_delete_constraint, axis=0))
+
+        # Delete elements from b and the corresponding elements of the constraint operation
+        # Iterating in reverse order to avoid index shifting issues
+        for index in sorted(to_delete_constraint, reverse=True):
+            del self.b[index]
+            del self.cons_senses[index]
+            del self.original_row_index[index]
+
+        # Update change_dictionary with the information about deleted elements
+        self.change_dictionary['eliminate_implied_bounds']['deleted_rows_indices'] = (
+            to_delete_constraint_original)
+
+        # Update operation table with the number of variables and constraints after this operation
+        self.operation_table.append(
+            ("Eliminate Implied Bounds", len(self.variable_names), len(self.cons_senses)))
+
+    def eliminate_redundant_rows(self):
+        """
+        Eliminates redundant rows from a linear programming model's constraints matrix.
+        """
+
+        dependent_rows, has_linear_dependency = linear_dependency(self.A, self.b)
+
+        # boolean for equalities
+        has_negative_counterpart, indices_list = find_corresponding_negative_rows_with_indices(self.A, self.b)
+
+        to_delete_constraint = []
+        to_delete_constraint_original = []
+
+        num_rows, num_cols = self.A.A.shape
+
+        # Iterate over the constraints
+        for i in range(num_rows):
+            if i not in to_delete_constraint:
+                if has_linear_dependency[i]:
+                    list_of_dependencies = dependent_rows[i]
+                    negative_counterpart_index = indices_list[i]
+                    for j in list_of_dependencies:
+                        if j != negative_counterpart_index:
+                            if j not in to_delete_constraint:
+                                to_delete_constraint.append(j)
+                                to_delete_constraint_original.append(self.original_row_index[j])
+
+        # Exclude constraints
+        self.A = csr_matrix(np.delete(self.A.toarray(), to_delete_constraint, axis=0))
+
+        # Delete elements from b and the corresponding elements of the constraint operation
+        # Iterating in reverse order to avoid index shifting issues
+        for index in sorted(to_delete_constraint, reverse=True):
+            del self.b[index]
+            del self.cons_senses[index]
+            del self.original_row_index[index]
+
+        # Update change_dictionary with the information about deleted elements
+        self.change_dictionary['eliminate_redundant_rows']['deleted_rows_indices'] = (
+            to_delete_constraint_original)
+
+        # Update operation table with the number of variables and constraints after this operation
+        self.operation_table.append(
+            ("Eliminate Redundant Rows", len(self.variable_names), len(self.cons_senses)))
