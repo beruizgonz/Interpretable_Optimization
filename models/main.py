@@ -35,7 +35,7 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'presolve',
-                             "name": 'kton_equality.mps'},
+                             "name": 'redundant_rows.mps'},
               "print_mathematical_format": False,
               "original_primal_canonical": True,
               "solve_models": False,
@@ -272,13 +272,13 @@ if __name__ == "__main__":
                                              perform_eliminate_zero_rows=False,
                                              perform_eliminate_zero_columns=False,
                                              perform_eliminate_singleton_equalities=False,
-                                             perform_eliminate_kton_equalities=True,
+                                             perform_eliminate_kton_equalities=False,
                                              k=2,
                                              perform_eliminate_singleton_inequalities=False,
                                              perform_eliminate_dual_singleton_inequalities=False,
                                              perform_eliminate_redundant_columns=False,
                                              perform_eliminate_implied_bounds=False,
-                                             perform_eliminate_redundant_rows=False)
+                                             perform_eliminate_redundant_rows=True)
 
         A, b, c, lb, ub, of_sense, cons_senses, co, variable_names, changes_dictionary, operation_table = (
             presolve_instance.orchestrator_presolve_operations())
