@@ -13,7 +13,7 @@ class PresolveComillas:
                  perform_eliminate_zero_columns=False,
                  perform_eliminate_singleton_equalities=False,
                  perform_eliminate_kton_equalities=False,
-                 k = 5,
+                 k=5,
                  perform_eliminate_singleton_inequalities=False,
                  perform_eliminate_dual_singleton_inequalities=False,
                  perform_eliminate_redundant_columns=False,
@@ -29,7 +29,7 @@ class PresolveComillas:
         self.model = model
 
         # input data for some operations
-        self.k = k # kton equalities
+        self.k = k  # kton equalities
 
         # boolean for presolve reductions
         self.perform_eliminate_zero_rows = perform_eliminate_zero_rows
@@ -318,7 +318,7 @@ class PresolveComillas:
 
                     # update objective function constant
                     if self.c[k_index] != 0:
-                        self.co -= self.co - self.c[k_index] * x_k
+                        self.co = self.co - self.c[k_index] * x_k
 
                     # Update A
                     self.A = csr_matrix(np.delete(self.A.toarray(), index_rows_to_delete, axis=0))
@@ -402,13 +402,13 @@ class PresolveComillas:
                 self.b[first_kton_index] = self.b[first_kton_index] / self.A.A[first_kton_index, kton_column]
 
                 # Update the row "kton_row" of A
-                self.A.A[first_kton_index, :] = self.A.A[first_kton_index, :] / self.A.A[first_kton_index, kton_column]
+                self.A[first_kton_index, :] = csr_matrix(self.A.A[first_kton_index, :] / self.A.A[first_kton_index, kton_column])
 
                 # Update the remaining rows/elements of A and b
                 for i in range(self.A.A.shape[0]):
                     if i != first_kton_index:
                         self.b[i] -= self.A.A[i, kton_column] * self.b[first_kton_index]
-                        self.A.A[i, :] -= self.A.A[i, kton_column] * self.A.A[first_kton_index, :]
+                        self.A[i, :] -= csr_matrix(self.A.A[i, kton_column] * self.A.A[first_kton_index, :])
 
                 # Update the objective function
                 self.co += self.c[kton_column] * self.b[first_kton_index]
@@ -425,7 +425,9 @@ class PresolveComillas:
                 del self.variable_names[kton_column]
                 del self.original_column_index[kton_column]
 
-                self.cons_senses[first_kton_index] = '<='
+                # Changing the constraint to <= --> similar to multiply A_i and b_i by -1 with >=
+                self.A[first_kton_index, :] = -1*self.A[first_kton_index, :]
+                self.b[first_kton_index] = -1*self.b[first_kton_index]
 
                 # Remove the negative counterpart
                 self.A = csr_matrix(np.delete(self.A.toarray(), index_rows_to_delete[-1], axis=0))

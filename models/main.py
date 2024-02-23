@@ -35,7 +35,7 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'presolve',
-                             "name": 'transp_singleton'},
+                             "name": 'kton_equality.mps'},
               "print_mathematical_format": False,
               "original_primal_canonical": True,
               "solve_models": False,
@@ -250,8 +250,7 @@ if __name__ == "__main__":
             f"{str(datetime.now())}: Solving the normalized primal model...")
 
         A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
-        A_norm, A_scaler = normalize_features(A)
-        b_norm = b / A_scaler
+        A_norm, b_norm, A_scaler = normalize_features(A, b)
         save_json(A_norm, b_norm, c, lb, ub, of_sense, cons_senses, current_matrices_path)
         created_primal_norm = build_model_from_json(current_matrices_path)
         created_primal_norm.setParam('OutputFlag', config['verbose'])
@@ -265,18 +264,21 @@ if __name__ == "__main__":
 
         # =============================================== Presolve operations ==========================================
         current_model = original_primal.copy()
+        print("========================= modelo original ============================")
+        print_model_in_mathematical_format(original_primal_bp)
+        print("========================= modelo canonico ============================")
         print_model_in_mathematical_format(current_model)
         presolve_instance = PresolveComillas(model=current_model,
                                              perform_eliminate_zero_rows=False,
                                              perform_eliminate_zero_columns=False,
                                              perform_eliminate_singleton_equalities=False,
-                                             perform_eliminate_kton_equalities=False,
+                                             perform_eliminate_kton_equalities=True,
                                              k=2,
                                              perform_eliminate_singleton_inequalities=False,
                                              perform_eliminate_dual_singleton_inequalities=False,
                                              perform_eliminate_redundant_columns=False,
                                              perform_eliminate_implied_bounds=False,
-                                             perform_eliminate_redundant_rows=True)
+                                             perform_eliminate_redundant_rows=False)
 
         A, b, c, lb, ub, of_sense, cons_senses, co, variable_names, changes_dictionary, operation_table = (
             presolve_instance.orchestrator_presolve_operations())

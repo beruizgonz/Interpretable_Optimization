@@ -1,4 +1,4 @@
-NAME          OptimizationProblem
+NAME          ImpliedBounds
 ROWS
  N  COST
  L  CON1

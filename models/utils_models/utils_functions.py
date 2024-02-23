@@ -292,7 +292,7 @@ def compare_models(model1, model2):
     return obj_deviation, avg_var_deviation
 
 
-def normalize_features(A):
+def normalize_features(A, b):
     """
     Normalize a CSR matrix by rows, but only for rows where the maximum value is not zero.
 
@@ -302,6 +302,7 @@ def normalize_features(A):
     Returns:
     norm_A (scipy.sparse.csr_matrix): The normalized matrix.
     scalers (numpy.array): Scale factors used for normalization (maximum value of each row, 1 for rows with max value of 0).
+    :param b:
     """
 
     # Initialize an array to store the scale factors
@@ -319,7 +320,9 @@ def normalize_features(A):
             norm_A[i] = row / max_value
             scalers[i] = max_value
 
-    return norm_A, scalers
+    b_norm = b / scalers
+
+    return norm_A, b_norm, scalers
 
 
 def matrix_sparsification(threshold, A_norm, A):
@@ -378,7 +381,7 @@ def sparsification_sensitivity_analysis(sens_data, model, params, model_to_use='
     A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model)
 
     # Calculate normalized A
-    A_norm, _ = normalize_features(A)
+    A_norm, _, _ = normalize_features(A, b)
 
     # Initialize lists to store results
     eps = [0]  # Start with 0 threshold
@@ -644,7 +647,7 @@ def constraint_reduction(model, threshold, path):
     A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model)
 
     # Normalize A
-    A_norm, _ = normalize_features(A)
+    A_norm, _, _ = normalize_features(A, b)
 
     # Calculate Euclidean distance of each row in A to the zero vector
     distances = np.linalg.norm(A_norm.toarray(), axis=1)
@@ -683,7 +686,7 @@ def constraint_distance_reduction_sensitivity_analysis(sens_data, model, params,
     A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model)
 
     # Calculate normalized A
-    A_norm, _ = normalize_features(A)
+    A_norm, _, _ = normalize_features(A, b)
 
     # Initialize lists to store results
     eps = [0]  # Start with 0 threshold
@@ -994,7 +997,7 @@ def sparsification_test(original_model, config, current_matrices_path):
     """
     # Extract matrices and vectors from the original model
     A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_model)
-    A_norm, A_scaler = normalize_features(A)
+    A_norm, _, A_scaler = normalize_features(A, b)
 
     # Apply matrix sparsification
     A_red = matrix_sparsification(config['test_sparsification']['threshold'], A_norm, A)
