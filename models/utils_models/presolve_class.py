@@ -1,7 +1,8 @@
 import numpy as np
 from scipy.sparse import csr_matrix
 from Interpretable_Optimization.models.utils_models.utils_functions import get_model_matrices, \
-    find_corresponding_negative_rows_with_indices, nested_dict, linear_dependency
+    find_corresponding_negative_rows_with_indices, nested_dict, linear_dependency, normalize_features, \
+    matrix_sparsification
 from collections import defaultdict
 import warnings
 
@@ -18,7 +19,8 @@ class PresolveComillas:
                  perform_eliminate_dual_singleton_inequalities=False,
                  perform_eliminate_redundant_columns=False,
                  perform_eliminate_implied_bounds=False,
-                 perform_eliminate_redundant_rows=False):
+                 perform_eliminate_redundant_rows=False,
+                 perform_reduction_small_coefficients=False):
         """
         Initialize the presolve operations class with an optional optimization model.
 
@@ -41,6 +43,7 @@ class PresolveComillas:
         self.perform_eliminate_redundant_columns = perform_eliminate_redundant_columns
         self.perform_eliminate_implied_bounds = perform_eliminate_implied_bounds
         self.perform_eliminate_redundant_rows = perform_eliminate_redundant_rows
+        self.perform_reduction_small_coefficients = perform_reduction_small_coefficients
 
         # Initialize placeholders for matrices and model components
         self.A = None
@@ -78,7 +81,7 @@ class PresolveComillas:
         self.original_column_index = list(range(self.A.A.shape[1]))
 
         # Add initial counts to the operation table
-        self.operation_table.append(("Initial", len(self.variable_names), len(self.cons_senses)))
+        self.operation_table.append(("Initial", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def orchestrator_presolve_operations(self):
         """
@@ -86,6 +89,9 @@ class PresolveComillas:
         """
         # Ensure matrices are loaded
         self.load_model_matrices()
+
+        if self.perform_reduction_small_coefficients:
+            self.reduction_small_coefficients()
 
         if self.perform_eliminate_implied_bounds:
             self.eliminate_implied_bounds()
@@ -197,7 +203,7 @@ class PresolveComillas:
         self.change_dictionary['eliminate_zero_rows']['deleted_rows_indices'] = to_delete_original
 
         # Update operation table with the number of variables and constraints after this operation
-        self.operation_table.append(("Eliminate Zero Rows", len(self.variable_names), len(self.cons_senses)))
+        self.operation_table.append(("Eliminate Zero Rows", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def eliminate_zero_columns(self):
         """
@@ -248,7 +254,7 @@ class PresolveComillas:
         self.change_dictionary['eliminate_zero_columns']['solution'] = solution
 
         # Update operation table with the number of variables and constraints after this operation
-        self.operation_table.append(("Eliminate Zero Columns", len(self.variable_names), len(self.cons_senses)))
+        self.operation_table.append(("Eliminate Zero Columns", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def eliminate_singleton_equalities(self):
         """
@@ -343,7 +349,7 @@ class PresolveComillas:
         self.change_dictionary['eliminate_singleton_equalities']['solutions'] = solution
 
         # Update operation table with the number of variables and constraints after this operation
-        self.operation_table.append(("Eliminate Singleton Equalities", len(self.variable_names), len(self.cons_senses)))
+        self.operation_table.append(("Eliminate Singleton Equalities", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def eliminate_kton_equalities(self):
         """
@@ -402,7 +408,8 @@ class PresolveComillas:
                 self.b[first_kton_index] = self.b[first_kton_index] / self.A.A[first_kton_index, kton_column]
 
                 # Update the row "kton_row" of A
-                self.A[first_kton_index, :] = csr_matrix(self.A.A[first_kton_index, :] / self.A.A[first_kton_index, kton_column])
+                self.A[first_kton_index, :] = csr_matrix(
+                    self.A.A[first_kton_index, :] / self.A.A[first_kton_index, kton_column])
 
                 # Update the remaining rows/elements of A and b
                 for i in range(self.A.A.shape[0]):
@@ -426,8 +433,8 @@ class PresolveComillas:
                 del self.original_column_index[kton_column]
 
                 # Changing the constraint to <= --> similar to multiply A_i and b_i by -1 with >=
-                self.A[first_kton_index, :] = -1*self.A[first_kton_index, :]
-                self.b[first_kton_index] = -1*self.b[first_kton_index]
+                self.A[first_kton_index, :] = -1 * self.A[first_kton_index, :]
+                self.b[first_kton_index] = -1 * self.b[first_kton_index]
 
                 # Remove the negative counterpart
                 self.A = csr_matrix(np.delete(self.A.toarray(), index_rows_to_delete[-1], axis=0))
@@ -444,7 +451,7 @@ class PresolveComillas:
 
         # Update operation table with the number of variables and constraints after this operation
         self.operation_table.append(
-            ("Eliminate Kton Equalities", len(self.variable_names), len(self.cons_senses)))
+            ("Eliminate Kton Equalities", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def eliminate_singleton_inequalities(self):
         """
@@ -527,7 +534,7 @@ class PresolveComillas:
 
         # Update operation table with the number of variables and constraints after this operation
         self.operation_table.append(
-            ("Eliminate Singleton Inequalities", len(self.variable_names), len(self.cons_senses)))
+            ("Eliminate Singleton Inequalities", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def eliminate_dual_singleton_inequalities(self):
         """
@@ -606,7 +613,7 @@ class PresolveComillas:
 
         # Update operation table with the number of variables and constraints after this operation
         self.operation_table.append(
-            ("Eliminate Dual Singleton Inequalities", len(self.variable_names), len(self.cons_senses)))
+            ("Eliminate Dual Singleton Inequalities", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def eliminate_redundant_columns(self):
         """
@@ -675,7 +682,7 @@ class PresolveComillas:
 
         # Update operation table with the number of variables and constraints after this operation
         self.operation_table.append(
-            ("Eliminate Redundant Columns", len(self.variable_names), len(self.cons_senses)))
+            ("Eliminate Redundant Columns", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def eliminate_implied_bounds(self, feasibility_tolerance=1e-6, infinity=1e30):
         """
@@ -724,7 +731,7 @@ class PresolveComillas:
 
         # Update operation table with the number of variables and constraints after this operation
         self.operation_table.append(
-            ("Eliminate Implied Bounds", len(self.variable_names), len(self.cons_senses)))
+            ("Eliminate Implied Bounds", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def eliminate_redundant_rows(self):
         """
@@ -769,4 +776,15 @@ class PresolveComillas:
 
         # Update operation table with the number of variables and constraints after this operation
         self.operation_table.append(
-            ("Eliminate Redundant Rows", len(self.variable_names), len(self.cons_senses)))
+            ("Eliminate Redundant Rows", len(self.cons_senses), len(self.variable_names), self.A.nnz))
+
+    def reduction_small_coefficients(self, threshold=5*10e-2):
+
+        A_norm, _, _ = normalize_features(self.A, self.b)
+
+        self.A = matrix_sparsification(threshold, A_norm, self.A)
+
+        # Update operation table with the number of variables and constraints after this operation
+        self.operation_table.append(
+            ("reduction Small Coefficients", len(self.cons_senses), len(self.variable_names), self.A.nnz))
+

@@ -920,7 +920,7 @@ def print_model_in_mathematical_format(model):
     print(bounds)
 
 
-def quality_check(original_primal_bp, original_primal, created_primal, created_dual, tolerance=1e-6):
+def quality_check(original_primal_bp, original_primal, created_primal, created_primal_norm, created_dual, tolerance=1e-6):
     """
     Performs a quality check on the provided optimization models, including a canonical model.
 
@@ -940,8 +940,8 @@ def quality_check(original_primal_bp, original_primal, created_primal, created_d
     - None
     """
     # Compare objective values of the primal models including the canonical model
-    primal_models = [original_primal_bp, original_primal, created_primal]
-    primal_models_names = ['original_primal_bp', 'original_primal', 'created_primal', 'canonical_primal']
+    primal_models = [original_primal_bp, original_primal, created_primal, created_primal_norm]
+    primal_models_names = ['original_primal_bp', 'original_primal', 'created_primal', 'created_primal_norm']
 
     for model1 in primal_models:
         for model2 in primal_models:
@@ -962,8 +962,8 @@ def quality_check(original_primal_bp, original_primal, created_primal, created_d
                 decision_vars[primal_models_names[ind]][var.VarName] = var.x
 
     # Comparing decision variable values across models
-    primal_created_models = [original_primal, created_primal]
-    primal_created_models_names = ['original_primal', 'created_primal', 'canonical_primal']
+    primal_created_models = [original_primal, created_primal, created_primal_norm]
+    primal_created_models_names = ['original_primal', 'created_primal', 'created_primal_norm']
 
     for i in range(len(primal_created_models)):
         for j in range(i + 1, len(primal_created_models)):
@@ -1128,7 +1128,7 @@ def get_info_GAMS(directory, save_excel=False):
         print(f"Summary saved to {output_file}")
 
 
-def detailed_info_models(original_primal_bp, original_primal, created_primal, created_dual):
+def detailed_info_models(original_primal_bp, original_primal, created_primal, created_primal_norm, created_dual):
     """
     Prints detailed information and comparisons for a set of optimization models.
 
@@ -1163,6 +1163,14 @@ def detailed_info_models(original_primal_bp, original_primal, created_primal, cr
         print("Optimal Objective Value =", created_primal.objVal)
         print("Basic Decision variables: ")
         for var in created_primal.getVars():
+            if var.x != 0:
+                print(f"{var.VarName} =", var.x)
+
+    if created_primal_norm.status == 2:
+        print("============ Created Normalized Model ============")
+        print("Optimal Objective Value =", created_primal_norm.objVal)
+        print("Basic Decision variables: ")
+        for var in created_primal_norm.getVars():
             if var.x != 0:
                 print(f"{var.VarName} =", var.x)
 
@@ -1399,7 +1407,7 @@ def canonical_form(model, minOption=False):
                 if var.VarName == variables_of[ind_o].VarName:
                     obj_coeff = canonical_model.getObjective().getCoeff(0)
                     new_obj_expr = canonical_model.getObjective() + obj_coeff * (x_pos - x_neg - var)
-                canonical_model.setObjective(new_obj_expr)
+                    canonical_model.setObjective(new_obj_expr)
 
             # Replace original variable in all constraints
             for constr in list(canonical_model.getConstrs()):
