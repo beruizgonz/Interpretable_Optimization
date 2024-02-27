@@ -13,6 +13,7 @@ import sys
 from gurobipy import GRB
 from scipy.sparse import issparse
 from collections import defaultdict
+from openpyxl import Workbook
 
 
 def nested_dict():
@@ -920,7 +921,8 @@ def print_model_in_mathematical_format(model):
     print(bounds)
 
 
-def quality_check(original_primal_bp, original_primal, created_primal, created_primal_norm, created_dual, tolerance=1e-6):
+def quality_check(original_primal_bp, original_primal, created_primal, created_primal_norm, created_dual,
+                  tolerance=1e-6):
     """
     Performs a quality check on the provided optimization models, including a canonical model.
 
@@ -962,8 +964,8 @@ def quality_check(original_primal_bp, original_primal, created_primal, created_p
                 decision_vars[primal_models_names[ind]][var.VarName] = var.x
 
     # Comparing decision variable values across models
-    primal_created_models = [original_primal, created_primal, created_primal_norm]
-    primal_created_models_names = ['original_primal', 'created_primal', 'created_primal_norm']
+    primal_created_models = [original_primal, created_primal]
+    primal_created_models_names = ['original_primal', 'created_primal']
 
     for i in range(len(primal_created_models)):
         for j in range(i + 1, len(primal_created_models)):
@@ -1549,3 +1551,61 @@ def model_stats(model):
     n_var = model.numVars
     n_const = model.numConstrs
     return n_var, n_const
+
+
+def get_primal_decisions_to_excel(models):
+    """
+    Saves the decision variable values of multiple optimization models into an Excel spreadsheet.
+
+    This function assumes that all provided models have the same set of decision variables.
+    The first column of the spreadsheet lists the variable names, and each subsequent column
+    lists the values of these variables in each model, respectively.
+
+    Parameters:
+    - models: A list of model objects. Each model object must have a `getVars()` method
+              that returns a list of variable objects, and each variable object must have
+              `VarName` and `x` attributes for the variable name and value, respectively.
+
+    Returns:
+    - The file path of the created Excel spreadsheet containing the decision variables.
+
+    Note:
+    - The Excel file is named "decision_variables_primal.xlsx" and is saved in the current
+      working directory.
+
+    """
+
+    # Get the current directory
+    current_directory = os.getcwd()
+
+    # Define the file name for the Excel file
+    excel_file = "decision_variables_primal.xlsx"
+    file_name = os.path.join(current_directory, excel_file)
+
+    # Initialize an Excel workbook and sheet
+    from openpyxl import Workbook
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Decision Variables"
+
+    # Set the header row with model names
+    headers = ["Variable Name"]
+    headers.extend([f"Model {i + 1}" for i in range(len(models))])
+    ws.append(headers)
+
+    # Assuming all models have the same variable names, use the first model for variable names
+    variable_names = [var.VarName for var in models[0].getVars()]
+
+    # Populate the Excel file
+    for var_name in variable_names:
+        row = [var_name]
+        for model in models:
+            var_value = next((var.x for var in model.getVars() if var.VarName == var_name), 0)
+            row.append(var_value)
+        ws.append(row)
+
+    # Save the workbook
+    wb.save(file_name)
+    return file_name
+
+

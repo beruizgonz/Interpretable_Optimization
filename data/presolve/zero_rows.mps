@@ -31,7 +31,7 @@ RHS
     RHS1      CON1        9
     RHS1      CON2        1
     RHS1      CON3       -5
-    RHS1      CON4        7
+    RHS1      CON4        -8
     RHS1      CON5      -10
 BOUNDS
  LO BND1      x1         0

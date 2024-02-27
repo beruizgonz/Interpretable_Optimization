@@ -3,7 +3,7 @@ import os
 import gurobipy as gp
 import logging
 import sys
-
+from tabulate import tabulate
 from datetime import datetime
 
 from Interpretable_Optimization.models.utils_models.presolve_class import PresolveComillas
@@ -13,7 +13,8 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \
     print_model_in_mathematical_format, visual_join_sensitivity, \
     measuring_constraint_infeasibility, quality_check, sparsification_test, constraint_reduction_test, get_info_GAMS, \
-    detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json, canonical_form, nested_dict
+    detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json, canonical_form, nested_dict, \
+    get_primal_decisions_to_excel
 
 from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
     eliminate_implied_bounds, small_coefficient_reduction, eliminate_zero_columns, \
@@ -34,21 +35,22 @@ if __name__ == "__main__":
                                "n_variables": 50000,
                                "n_constraints": 4},
               "load_model": {"val": True,
-                             "load_path": 'GAMS_library',
-                             "name": 'AGRESTE.mps'},
-              "print_mathematical_format": False,
+                             "load_path": 'presolve',
+                             "name": 'zero_rows.mps'},
+              "print_mathematical_format": True,
               "original_primal_canonical": {"val": True,
                                             "MinMode": True},
-              "solve_models": True,
-              "quality_check": True,
+              "solve_models": False,
+              "quality_check": False,
               "verbose": 0,
               "print_detail_sol": False,
+              "primal_decisions2excel": False,
               "save_original_model": {"val": False,
                                       "save_name": 'transp_singleton.mps',
                                       "save_path": 'models_library'},
               "presolve": {"val": True,
                            "model_presolve": 'original_primal',
-                           "presolve_operations": PresolveComillas(model='original_primal',
+                           "presolve_operations": PresolveComillas(model=None,
                                                                 perform_eliminate_zero_rows=False,
                                                                 perform_eliminate_zero_columns=False,
                                                                 perform_eliminate_singleton_equalities=False,
@@ -59,7 +61,8 @@ if __name__ == "__main__":
                                                                 perform_eliminate_redundant_columns=False,
                                                                 perform_eliminate_implied_bounds=False,
                                                                 perform_eliminate_redundant_rows=False,
-                                                                perform_reduction_small_coefficients=True)
+                                                                perform_reduction_small_coefficients=False,
+                                                                perform_bound_strengthening=True)
     }}
 
     # ================================================== Directories to work ===========================================
@@ -252,7 +255,15 @@ if __name__ == "__main__":
 
         # printing detailed information about the models
         if config['print_detail_sol']:
+            log.info(
+                f"{str(datetime.now())}: Printing detailed solution")
             detailed_info_models(original_primal_bp, original_primal, created_primal, created_primal_norm, created_dual)
+
+        # Saving primal decision variables to excel to comparison
+        if config['primal_decisions2excel']:
+            log.info(
+                f"{str(datetime.now())}: Saving primal solution to excel")
+            file_path = get_primal_decisions_to_excel([original_primal, created_primal, created_primal_norm])
 
         # ================================================== Quality check =============================================
         if config['quality_check']:
@@ -263,10 +274,14 @@ if __name__ == "__main__":
 
         # =============================================== Presolve operations ==========================================
         if config['presolve']['val']:
-            log.info(
-                f"{str(datetime.now())}: Presolve operations...")
             if config['presolve']['model_presolve'] == 'original_primal':
+                log.info(
+                    f"{str(datetime.now())}: Presolve operations with the original_primal...")
                 model_to_use = original_primal
+            else:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operations with the created_dual...")
+                model_to_use = created_dual
 
             presolve_instance = config['presolve']['presolve_operations']
             presolve_instance.model = model_to_use
@@ -274,4 +289,19 @@ if __name__ == "__main__":
             A, b, c, lb, ub, of_sense, cons_senses, co, variable_names, changes_dictionary, operation_table = (
                 presolve_instance.orchestrator_presolve_operations())
 
-            print(operation_table)
+            log.info(
+                f"{str(datetime.now())}:\n{tabulate(operation_table, headers=['Operation', 'Rows', 'Columns', 'Non-Zeros'], tablefmt='grid')}"
+            )
+
+            print("===================== Original model =====================")
+            print_model_in_mathematical_format(original_primal_bp)
+
+            print("===================== Model before presolve =====================")
+            print_model_in_mathematical_format(model_to_use)
+
+            save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
+            model_after = build_model_from_json(current_matrices_path)
+
+            print("===================== Model after presolve =====================")
+            print_model_in_mathematical_format(model_after)
+

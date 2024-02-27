@@ -5,6 +5,11 @@ from Interpretable_Optimization.models.utils_models.utils_functions import get_m
     matrix_sparsification
 from collections import defaultdict
 import warnings
+from datetime import datetime
+import logging
+logging.basicConfig()
+log = logging.getLogger(__name__)
+log.setLevel('INFO')
 
 
 class PresolveComillas:
@@ -20,7 +25,8 @@ class PresolveComillas:
                  perform_eliminate_redundant_columns=False,
                  perform_eliminate_implied_bounds=False,
                  perform_eliminate_redundant_rows=False,
-                 perform_reduction_small_coefficients=False):
+                 perform_reduction_small_coefficients=False,
+                 perform_bound_strengthening=False):
         """
         Initialize the presolve operations class with an optional optimization model.
 
@@ -44,6 +50,7 @@ class PresolveComillas:
         self.perform_eliminate_implied_bounds = perform_eliminate_implied_bounds
         self.perform_eliminate_redundant_rows = perform_eliminate_redundant_rows
         self.perform_reduction_small_coefficients = perform_reduction_small_coefficients
+        self.perform_bound_strengthening = perform_bound_strengthening
 
         # Initialize placeholders for matrices and model components
         self.A = None
@@ -91,34 +98,59 @@ class PresolveComillas:
         self.load_model_matrices()
 
         if self.perform_reduction_small_coefficients:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: reduction_small_coefficients")
             self.reduction_small_coefficients()
 
         if self.perform_eliminate_implied_bounds:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: eliminate_implied_bounds")
             self.eliminate_implied_bounds()
 
         if self.perform_eliminate_redundant_rows:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: eliminate_redundant_rows")
             self.eliminate_redundant_rows()
 
         if self.perform_eliminate_kton_equalities:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: eliminate_kton_equalities, k = {self.k}")
             self.eliminate_kton_equalities()
 
         if self.perform_eliminate_singleton_equalities:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: eliminate_singleton_equalities")
             self.eliminate_singleton_equalities()
 
         if self.perform_eliminate_singleton_inequalities:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: eliminate_singleton_inequalities")
             self.eliminate_singleton_inequalities()
 
         if self.perform_eliminate_dual_singleton_inequalities:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: eliminate_dual_singleton_inequalities")
             self.eliminate_dual_singleton_inequalities()
 
         if self.perform_eliminate_redundant_columns:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: eliminate_redundant_columns")
             self.eliminate_redundant_columns()
 
         if self.perform_eliminate_zero_rows:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: eliminate_zero_rows")
             self.eliminate_zero_rows()
 
         if self.perform_eliminate_zero_columns:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: eliminate_zero_columns")
             self.eliminate_zero_columns()
+
+        if self.perform_bound_strengthening:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: bound_strengthening")
+            self.bound_strengthening()
 
         return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
                 self.change_dictionary, self.operation_table)
@@ -704,8 +736,8 @@ class PresolveComillas:
         for i in range(num_rows):
 
             if self.b[i] >= infinity:
-                to_delete_constraint.append(i)
-                to_delete_constraint_original.append(self.original_row_index[i])
+                warnings.warn(f"Model is infeasible: RHS of constraint {i} is higher than the practical infinite.",
+                              RuntimeWarning)
 
             if INF[i] > (self.b[i] + feasibility_tolerance):
                 to_delete_constraint.append(i)
@@ -787,4 +819,50 @@ class PresolveComillas:
         # Update operation table with the number of variables and constraints after this operation
         self.operation_table.append(
             ("reduction Small Coefficients", len(self.cons_senses), len(self.variable_names), self.A.nnz))
+
+
+    def bound_strengthening(self):
+        SUPP, INF, SUP = self.get_row_activities()
+
+        # condition for at least 2 elements in SUPP
+        cond_1 = [len(s) >= 2 for s in SUPP]
+
+        # condition for at least one positive in aij as support of the row
+        aij_supp = [{self.A.A[i, j] for j in s} for i, s in enumerate(SUPP)]
+        cond_2 = [any(element > 0 for element in row_set) for row_set in aij_supp]
+
+        # condition for on top 1 negative value as support
+        cond_3 = [len([element for element in row_set if element < 0]) <= 1 for row_set in aij_supp]
+
+        combined_condition = [c1 and c2 and c3 for c1, c2, c3 in zip(cond_1, cond_2, cond_3)]
+
+        num_rows, num_cols = self.A.A.shape
+
+        # Iterate over the constraints
+        for i in range(num_rows):
+            if combined_condition[i]:
+                # choosing x_k
+                # Filter for negative values in aij_supp for the current row
+                negative_values = [val for val in aij_supp[i] if val < 0]
+                if negative_values:
+                    x_k_choices = negative_values[0]  # Choose a negative value if available
+                    neg_cond = True
+                else:
+                    vector = list(aij_supp[i])
+                    neg_cond = False
+
+                if neg_cond:
+                    ub_k = self.b[i]/x_k_choices
+                    if (ub_k < self.ub[i]) and (ub_k > self.lb[i]):
+                        self.ub[i] = ub_k
+                else:
+                    for j in range(vector):
+                        x_k_choices = vector[j]
+                        lb_k = self.b[i]/x_k_choices
+                        if (lb_k > self.lb[i]) and (lb_k < self.ub[i]):
+                            self.lb[i] = lb_k
+
+
+
+
 
