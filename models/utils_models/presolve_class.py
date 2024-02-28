@@ -7,6 +7,7 @@ from collections import defaultdict
 import warnings
 from datetime import datetime
 import logging
+
 logging.basicConfig()
 log = logging.getLogger(__name__)
 log.setLevel('INFO')
@@ -52,6 +53,8 @@ class PresolveComillas:
         self.perform_reduction_small_coefficients = perform_reduction_small_coefficients
         self.perform_bound_strengthening = perform_bound_strengthening
 
+        self.threshold_small = 0.1
+
         # Initialize placeholders for matrices and model components
         self.A = None
         self.b = None
@@ -96,11 +99,6 @@ class PresolveComillas:
         """
         # Ensure matrices are loaded
         self.load_model_matrices()
-
-        if self.perform_reduction_small_coefficients:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: reduction_small_coefficients")
-            self.reduction_small_coefficients()
 
         if self.perform_eliminate_implied_bounds:
             log.info(
@@ -151,6 +149,11 @@ class PresolveComillas:
             log.info(
                 f"{str(datetime.now())}: Presolve operation: bound_strengthening")
             self.bound_strengthening()
+
+        if self.perform_reduction_small_coefficients:
+            log.info(
+                f"{str(datetime.now())}: Presolve operation: reduction_small_coefficients")
+            self.reduction_small_coefficients()
 
         return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
                 self.change_dictionary, self.operation_table)
@@ -235,7 +238,8 @@ class PresolveComillas:
         self.change_dictionary['eliminate_zero_rows']['deleted_rows_indices'] = to_delete_original
 
         # Update operation table with the number of variables and constraints after this operation
-        self.operation_table.append(("Eliminate Zero Rows", len(self.cons_senses), len(self.variable_names), self.A.nnz))
+        self.operation_table.append(
+            ("Eliminate Zero Rows", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def eliminate_zero_columns(self):
         """
@@ -286,7 +290,8 @@ class PresolveComillas:
         self.change_dictionary['eliminate_zero_columns']['solution'] = solution
 
         # Update operation table with the number of variables and constraints after this operation
-        self.operation_table.append(("Eliminate Zero Columns", len(self.cons_senses), len(self.variable_names), self.A.nnz))
+        self.operation_table.append(
+            ("Eliminate Zero Columns", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def eliminate_singleton_equalities(self):
         """
@@ -381,7 +386,8 @@ class PresolveComillas:
         self.change_dictionary['eliminate_singleton_equalities']['solutions'] = solution
 
         # Update operation table with the number of variables and constraints after this operation
-        self.operation_table.append(("Eliminate Singleton Equalities", len(self.cons_senses), len(self.variable_names), self.A.nnz))
+        self.operation_table.append(
+            ("Eliminate Singleton Equalities", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
     def eliminate_kton_equalities(self):
         """
@@ -810,18 +816,76 @@ class PresolveComillas:
         self.operation_table.append(
             ("Eliminate Redundant Rows", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
-    def reduction_small_coefficients(self, threshold=5*10e-2):
+    def reduction_small_coefficients(self):
+        """
+        Performs coefficient reduction on small elements in the constraint matrix based on specific conditions,
+        adjusting the RHS (right-hand side) vector accordingly, for rows where the upper bound of variables is finite.
 
+        This method specifically targets elements in the constraint matrix (A) that are deemed 'small' based on
+        predefined thresholds, aiming to simplify the problem by reducing these elements to zero whenever possible,
+        under the condition that such a simplification does not ignore the bounds of variables involved.
+
+        Algorithm Steps:
+        1. Normalize the coefficient matrix (A) and the RHS vector (b).
+        2. For each row in the normalized matrix, proceed only if the upper bound of the corresponding variable is finite.
+        3. For each element (a_ij) in these rows, apply two conditions to decide on its reduction:
+           a. The absolute value of a_ij is less than a specified small threshold (self.threshold_small).
+           b. The product of the absolute value of a_ij, the difference between the upper and lower bounds of the variable (u_j - l_j), and the size of the support set of the row is less than 10^-2 times the specified threshold.
+        4. If both conditions are met, adjust the corresponding entry in the RHS vector (b) by subtracting the product of the element and the lower bound of the variable (l_j), and then set the matrix element (a_ij) to zero.
+
+        The function concludes by updating an operation table with the current number of variables, constraints, and nonzero elements in the matrix, providing a summary of the problem size after the reduction operation.
+        """
         A_norm, _, _ = normalize_features(self.A, self.b)
+        SUPP, _, _ = self.get_row_activities()
+        num_rows, num_cols = A_norm.shape
 
-        self.A = matrix_sparsification(threshold, A_norm, self.A)
+        for i in range(num_rows):
+            if np.isfinite(self.ub[i]):
+                for j in range(num_cols):
+                    a_ij = A_norm.A[i, j]
+                    u_j = self.ub[j]
+                    l_j = self.lb[j]
+                    # Compute conditions
+                    cond_1 = abs(a_ij) < self.threshold_small
+                    supp_size = len([x for x in A_norm.A[i, :] if x != 0])
+                    cond_2 = abs(a_ij) * (u_j - l_j) * supp_size < 10 ** -2 * self.threshold_small
+
+                    # Apply conditions
+                    if cond_1 and cond_2:
+                        self.b[i] = self.b[i] - self.A[i, j] * l_j
+                        self.A[i, j] = 0
 
         # Update operation table with the number of variables and constraints after this operation
         self.operation_table.append(
             ("reduction Small Coefficients", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
-
     def bound_strengthening(self):
+        """
+            Perform bound strengthening on the linear problem to tighten the variable bounds.
+
+            This method applies a preprocessing step that aims to reduce the feasible region of the problem
+            by tightening the upper and lower bounds of variables based on the constraints' coefficients.
+            It specifically targets rows with sufficient activity and potential for bound improvement
+            based on the presence of positive and negative coefficients.
+
+            Steps:
+            1. Determine the support set (SUPP) for each constraint, which includes indices of non-zero coefficients.
+            2. Apply three conditions to filter rows for bound tightening:
+                - Condition 1: The support set contains at least two elements, indicating a non-trivial constraint.
+                - Condition 2: There's at least one positive coefficient in the constraint, suggesting upward bound potential.
+                - Condition 3: At most one negative coefficient is present, aiming for straightforward bound adjustments.
+            3. For rows meeting all conditions, select a coefficient (`x_k`) to base the bound adjustment on:
+                - Prefer a negative coefficient if available, to adjust the upper bound of the corresponding variable.
+                - Otherwise, use any coefficient for potentially adjusting the lower bound.
+            4. Calculate and apply bound adjustments based on the selected coefficient and the constraint's RHS value (b[i]).
+
+            Note:
+            This method assumes that self.A.A represents the coefficient matrix, with rows corresponding to constraints
+            and columns to variables. The variables' current bounds are stored in self.lb (lower bounds) and self.ub (upper bounds).
+
+            Modifies:
+            - self.lb and self.ub are updated with tightened bounds where applicable.
+            """
         SUPP, INF, SUP = self.get_row_activities()
 
         # condition for at least 2 elements in SUPP
@@ -852,17 +916,12 @@ class PresolveComillas:
                     neg_cond = False
 
                 if neg_cond:
-                    ub_k = self.b[i]/x_k_choices
+                    ub_k = self.b[i] / x_k_choices
                     if (ub_k < self.ub[i]) and (ub_k > self.lb[i]):
                         self.ub[i] = ub_k
                 else:
                     for j in range(vector):
                         x_k_choices = vector[j]
-                        lb_k = self.b[i]/x_k_choices
+                        lb_k = self.b[i] / x_k_choices
                         if (lb_k > self.lb[i]) and (lb_k < self.ub[i]):
                             self.lb[i] = lb_k
-
-
-
-
-

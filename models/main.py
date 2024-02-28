@@ -61,7 +61,7 @@ if __name__ == "__main__":
                                                                 perform_eliminate_redundant_columns=False,
                                                                 perform_eliminate_implied_bounds=False,
                                                                 perform_eliminate_redundant_rows=False,
-                                                                perform_reduction_small_coefficients=False,
+                                                                perform_reduction_small_coefficients=True,
                                                                 perform_bound_strengthening=True)
     }}
 
