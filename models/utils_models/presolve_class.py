@@ -158,7 +158,7 @@ class PresolveComillas:
         return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
                 self.change_dictionary, self.operation_table)
 
-    def get_row_activities(self):
+    def ockget_row_activities(self):
         """
         Compute and return the support, minimal activity, and maximal activity for each row in a Gurobi model.
         Returns:
@@ -295,10 +295,34 @@ class PresolveComillas:
 
     def eliminate_singleton_equalities(self):
         """
-        This function processes a Gurobi model to eliminate singleton equality constraints.
-        It simplifies the model by fixing variables and updating the model accordingly.
-        If a negative fixed value for a variable is found, the model is declared infeasible.
-        """
+        Eliminates singleton equality constraints from a linear programming model and updates the model accordingly.
+
+        Singleton equality constraints are constraints that involve only one variable. This method identifies such
+        constraints and, if possible, fixes the involved variable to a specific value to simplify the model. This process
+        can lead to a reduction in the number of variables and constraints, potentially making the model easier to solve.
+
+        Process:
+        1. The method iteratively searches for singleton equality constraints with a corresponding negative counterpart
+           (another constraint that can be combined to eliminate the variable).
+        2. For each identified singleton, it calculates the value that the variable must take to satisfy the constraint.
+        3. If the calculated value is non-negative, the method proceeds to fix the variable at that value, update the
+           model (including the objective function if necessary), and remove the constraints involved.
+        4. If fixing a variable results in a negative value, which would violate non-negativity constraints,
+           the model is declared infeasible.
+
+        The method updates several aspects of the model, including:
+        - The constraint matrix (self.A), by removing columns associated with fixed variables and rows of eliminated constraints.
+        - The right-hand side vector (self.b), adjusting values based on the fixed variables.
+        - Variable bounds (self.lb and self.ub), to reflect the fixing of variables.
+        - The objective function, if any of the fixed variables appear with a non-zero coefficient.
+
+        Additionally, the method maintains a solution dictionary and a change dictionary to track the variables fixed
+        and the modifications made to the model components.
+
+        Warnings:
+        - If a singleton constraint requires fixing a variable to a negative value, a warning is raised about model
+          infeasibility, as this would violate typical non-negativity constraints on decision variables.
+    """
 
         # Variable to track if we found a singleton in the current iteration
         found_singleton = True

@@ -14,6 +14,7 @@ from gurobipy import GRB
 from scipy.sparse import issparse
 from collections import defaultdict
 from openpyxl import Workbook
+import pickle
 
 
 def nested_dict():
@@ -1531,6 +1532,7 @@ def linear_dependency(A, b, feasibility_tolerance=0.01):
                         close_enough = np.all(np.abs(div_filtered - div_with_value) < feasibility_tolerance)
                         if close_enough:
                             has_linear_dependency[i] = True
+                            has_linear_dependency[j] = True
                             dependent_rows[i].append(j)
                             dependent_rows[j].append(i)
 
@@ -1609,3 +1611,40 @@ def get_primal_decisions_to_excel(models):
     return file_name
 
 
+def store_models_matrices(path, action='store'):
+    if action == 'store':
+        models_matrices = {}
+
+        for filename in os.listdir(path):
+            if filename.endswith(".mps"):
+                model_name = filename[:-4]  # Remove the .mps extension
+                model_path = os.path.join(path, filename)
+
+                # Create a Gurobi model from the .mps file
+                model = gp.read(model_path)
+
+                # Extract matrices
+                A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model)
+
+                # Convert matrices and vectors to serializable formats
+                # Assuming get_model_matrices already returns in a serializable format or implement conversion here
+
+                models_matrices[model_name] = {
+                    'A': A.A,  # Convert if necessary
+                    'b': b.tolist() if hasattr(b, 'tolist') else b,
+                    'c': c.tolist() if hasattr(c, 'tolist') else c,
+                    'co': co,
+                    'lb': lb.tolist() if hasattr(lb, 'tolist') else lb,
+                    'ub': ub.tolist() if hasattr(ub, 'tolist') else ub,
+                    'of_sense': of_sense,
+                    'cons_senses': cons_senses,
+                    'variable_names': variable_names
+                }
+
+        # Save the dictionary as a JSON file
+        with open('models_matrices.pkl', 'wb') as f:
+            pickle.dump(models_matrices, f)
+    else:
+        with open('models_matrices.pkl', 'rb') as f:
+            loaded_models_matrices = pickle.load(f)
+        return loaded_models_matrices

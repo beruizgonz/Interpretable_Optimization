@@ -14,7 +14,7 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     print_model_in_mathematical_format, visual_join_sensitivity, \
     measuring_constraint_infeasibility, quality_check, sparsification_test, constraint_reduction_test, get_info_GAMS, \
     detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json, canonical_form, nested_dict, \
-    get_primal_decisions_to_excel
+    get_primal_decisions_to_excel, store_models_matrices
 
 from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
     eliminate_implied_bounds, small_coefficient_reduction, eliminate_zero_columns, \
@@ -31,6 +31,7 @@ if __name__ == "__main__":
     # ====================================== Defining initial configuration ============================================
     config = {"get_only_GAMS_info": {"val": False,
                                      "save_xls": False},
+              "get_only_GAMS_data": True,
               "create_model": {"val": False,
                                "n_variables": 50000,
                                "n_constraints": 4},
@@ -83,6 +84,13 @@ if __name__ == "__main__":
     if config['get_only_GAMS_info']['val']:
         gams_path = os.path.join(data_path, 'GAMS_library')
         get_info_GAMS(gams_path, save_excel=config['get_only_GAMS_info']['save_xls'])
+        sys.exit()
+
+    # =================================================== store GAMS data ==============================================
+    if config['get_only_GAMS_data']:
+        gams_path = os.path.join(data_path, 'GAMS_library')
+        # store_models_matrices(gams_path)
+        data = store_models_matrices(gams_path, action='load')
         sys.exit()
 
     # ================================= Creating or loading the original_primal model ==================================
