@@ -13,9 +13,8 @@ import sys
 from gurobipy import GRB
 from scipy.sparse import issparse
 from collections import defaultdict
-from openpyxl import Workbook
 import pickle
-
+import pyomo.environ as pyo
 
 def nested_dict():
     """
@@ -1648,3 +1647,50 @@ def store_models_matrices(path, action='store'):
         with open('models_matrices.pkl', 'rb') as f:
             loaded_models_matrices = pickle.load(f)
         return loaded_models_matrices
+
+
+def gurobi_to_pyomo(gurobi_model):
+    """
+    Converts a Gurobi model into an equivalent Pyomo model using the get_model_matrices function to extract
+    model components.
+
+    Parameters:
+    gurobi_model (gurobipy.Model): The Gurobi model to be converted.
+
+    Returns:
+    pyomo.environ.ConcreteModel: An equivalent Pyomo model.
+    """
+    # Extract matrices and vectors from the Gurobi model
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(gurobi_model)
+
+    # Initialize a new Pyomo model
+    pyomo_model = pyo.ConcreteModel()
+
+    # Create Pyomo variables with the same names and bounds
+    pyomo_model.vars = pyo.Var(variable_names, domain=pyo.Reals)
+    for var_name, lower, upper in zip(variable_names, lb, ub):
+        var = pyomo_model.vars[var_name]
+        var.setlb(lower)
+        var.setub(upper)
+
+    # Create the objective function with the constant term included
+    objective_expr = sum(c[i] * pyomo_model.vars[var_name] for i, var_name in enumerate(variable_names)) + co
+    if of_sense == -1:  # Minimization in Gurobi is represented by -1
+        pyomo_model.obj = pyo.Objective(expr=objective_expr, sense=pyo.minimize)
+    else:  # Maximization in Gurobi is represented by 1
+        pyomo_model.obj = pyo.Objective(expr=objective_expr, sense=pyo.maximize)
+
+    # Add constraints to the Pyomo model
+    pyomo_model.cons = pyo.ConstraintList()
+    for i in range(len(b)):
+        row = A.getrow(i)  # Extract ith row from sparse matrix A
+        lhs_expr = sum(row[0,j] * pyomo_model.vars[variable_names[j]] for j in row.indices)
+        if cons_senses[i] == '<':
+            pyomo_model.cons.add(lhs_expr <= b[i])
+        elif cons_senses[i] == '>':
+            pyomo_model.cons.add(lhs_expr >= b[i])
+        else:  # Equality
+            pyomo_model.cons.add(lhs_expr == b[i])
+
+    return pyomo_model
+
