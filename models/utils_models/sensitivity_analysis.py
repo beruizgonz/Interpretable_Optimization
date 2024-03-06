@@ -1,3 +1,204 @@
+from datetime import datetime
+import logging
+from Interpretable_Optimization.models.utils_models.presolve_class import PresolveComillas
+from collections import defaultdict
+import gurobipy as gp
+import sys
+import os
+from Interpretable_Optimization.models.utils_models.presolve_class import PresolveComillas
+from Interpretable_Optimization.models.utils_models.utils_functions import nested_dict, get_model_matrices, \
+    measuring_constraint_infeasibility, save_json, build_model_from_json
+import numpy as np
+
+logging.basicConfig()
+log = logging.getLogger(__name__)
+log.setLevel('INFO')
+
+
+class SensitivityAnalysis:
+
+    def __init__(self,
+                 model=None,
+                 save_path=None,
+                 perform_reduction_small_coefficients=None):
+
+        """
+        docstring
+        """
+        self.model = model
+        self.save_path = save_path
+
+        self.practical_infinity = 1e20
+        self.perform_reduction_small_coefficients = perform_reduction_small_coefficients
+        self.save_path = save_path
+
+    def load_model_matrices(self):
+        """
+        Extract and load matrices and other components from the optimization model.
+        """
+        if self.model is None:
+            raise ValueError("Model is not provided.")
+
+        self.A, self.b, self.c, self.co, self.lb, self.ub, self.of_sense, self.cons_senses, self.variable_names = (
+            get_model_matrices(self.model))
+
+        # Generate original row indices from 0 to the number of constraints
+        self.original_row_index = list(range(self.A.A.shape[0]))
+
+        # Generate original columns indices from 0 to the number of variables
+        self.original_column_index = list(range(self.A.A.shape[1]))
+
+    def orchestrator_sensitivity_operations(self):
+        """
+        Perform sensitivity analysis based on the specified configurations.
+        """
+
+        # Ensure matrices are loaded
+        self.load_model_matrices()
+
+        if self.perform_reduction_small_coefficients['val']:
+            log.info(
+                f"{str(datetime.now())}: Sensitivity Analysis: Small Coefficients")
+            self.presolve_instance = PresolveComillas(model=self.model,
+                                                 perform_reduction_small_coefficients={"val": True,
+                                                                                       "threshold_small": None})
+            self.sens_anals_small_coeffs()
+
+    def sens_anals_small_coeffs(self):
+
+        # Initialize lists to store results
+        self.model.setParam('OutputFlag', 0)
+        self.model.optimize()
+        eps = [0]  # Start with 0 threshold
+        dv = [np.array([var.x for var in self.model.getVars()])]  # Start with decision variables of original model
+        changed_indices = [None]  # List to store indices changed at each threshold
+        abs_vio, obj_val = measuring_constraint_infeasibility(self.model, dv[0])
+        of = [obj_val]  # Start with the objective value of the original model
+        constraint_viol = [abs_vio]  # List to store infeasibility results
+        of_dec = [self.model.objVal]
+        iteration = 1  # Initialize iteration counter
+
+        A_initial = self.A.A.copy()
+        original_model = self.model.copy()
+
+        # Calculate total iterations
+        total_iterations = (
+                int((self.perform_reduction_small_coefficients['max_threshold'] -
+                     self.perform_reduction_small_coefficients['init_threshold']) /
+                    self.perform_reduction_small_coefficients['step_threshold']) + 1)
+
+        threshold = self.perform_reduction_small_coefficients['init_threshold']
+
+        while threshold <= self.perform_reduction_small_coefficients['max_threshold']:
+            self.presolve_instance.perform_reduction_small_coefficients['threshold_small'] = threshold
+            A, b, c, lb, ub, of_sense, cons_senses, co, variable_names, changes_dictionary, operation_table = (
+                self.presolve_instance.orchestrator_presolve_operations())
+
+            A_changed = self.A.A.copy()
+
+            # Record indices where A has been changed
+            indices = [(i, j) for i in range(self.A.shape[0]) for j in range(self.A.shape[1]) if
+                       A_initial[i, j] != 0 and A_changed[i, j] == 0]
+
+            # Save the matrices
+            save_json(A, b, c, lb, ub, of_sense, cons_senses, self.save_path, self.co, self.variable_names)
+
+            # Create a new model from the saved matrices
+            iterative_model = build_model_from_json(self.save_path)
+
+            # Solve the new model
+            iterative_model.setParam('OutputFlag', 0)
+            iterative_model.optimize()
+
+            # Update lists with results
+            # Check if the model found a solution
+            if iterative_model.status == gp.GRB.OPTIMAL:
+                # Model found a solution
+                eps.append(threshold)
+                of.append(iterative_model.objVal)
+                changed_indices.append(indices)
+                dv.append(np.array([var.x for var in iterative_model.getVars()]))
+                # Access the decision variables
+                variables = iterative_model.getVars()
+                # Extract their values and store in a NumPy array
+                decisions = np.array([var.x for var in variables])
+                # calculate the constraint infeasibility
+                abs_vio, obj_val = measuring_constraint_infeasibility(original_model, decisions)
+
+                # Store infeasibility results
+                of_dec.append(obj_val)
+                constraint_viol.append(abs_vio)
+            else:
+                # Model did not find a solution
+                eps.append(threshold)
+                of.append(np.nan)  # Append NaN for objective function
+                of_dec.append(np.nan)
+                changed_indices.append(np.nan)
+                constraint_viol.append(np.nan)
+                dv.append(np.full(len(original_model.getVars()), np.nan))
+
+            # Delete the model to free up resources
+            del iterative_model
+
+            # Progress bar
+            progress = iteration / total_iterations
+            bar_length = 50  # Length of the progress bar
+            progress_bar = '>' * int(bar_length * progress) + ' ' * (bar_length - int(bar_length * progress))
+            sys.stdout.write(f"\r[{progress_bar}] Iteration {iteration}/{total_iterations}")
+            sys.stdout.flush()
+
+            iteration += 1  # Increment iteration counter
+
+            # Increment threshold
+            threshold += self.perform_reduction_small_coefficients['step_threshold']
+
+
+
+
+
+
+        # =================== Sensitivity analysis on matrix sparsification for different thresholds ===================
+        if config['sparsification_sa']['val']:
+            log.info(
+                f"{str(datetime.now())}: Sensitivity analysis on matrix sparsification for different thresholds:")
+
+        log.info(f"{datetime.now()}: Processing primal...")
+        eps_p, of_p, dv_p, ind_p, cviol_p, of_dec_p = sparsification_sensitivity_analysis(current_matrices_path,
+                                                                                          original_primal,
+                                                                                          config[
+                                                                                              'sparsification_sa'],
+                                                                                          model_to_use='primal')
+
+        log.info(f"{datetime.now()}: Processing dual...")
+
+        eps_d, of_d, dv_d, ind_d, cviol_d, of_dec_d = sparsification_sensitivity_analysis(current_matrices_path,
+                                                                                          created_dual,
+                                                                                          config[
+                                                                                              'sparsification_sa'],
+                                                                                          model_to_use='dual')
+
+        # Assign results to the 'primal' and 'dual' keys using dictionary unpacking
+        sparsification_results[model_name]['primal'] = {
+
+            'epsilon': eps_p,
+            'objective_function': of_p,
+            'decision_variables': dv_p,
+            'changed_indices': ind_p,
+            'constraint_violation': cviol_p,
+            'of_original_decision': of_dec_p
+
+        }
+
+
+sparsification_results[model_name]['dual'] = {
+    'epsilon': eps_d,
+    'objective_function': of_d,
+    'decision_variables': dv_d,
+    'changed_indices': ind_d,
+    'constraint_violation': cviol_d,
+    'of_original_decision': of_dec_d
+}
+
 # if config['presolve_operations']['eliminate_zero_rows']:
 #     log.info(
 #         f"{str(datetime.now())}: Presolve operations - eliminate zero rows")

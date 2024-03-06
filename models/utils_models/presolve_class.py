@@ -19,15 +19,14 @@ class PresolveComillas:
                  perform_eliminate_zero_rows=False,
                  perform_eliminate_zero_columns=False,
                  perform_eliminate_singleton_equalities=False,
-                 perform_eliminate_kton_equalities=False,
-                 k=5,
+                 perform_eliminate_kton_equalities=None,
                  perform_eliminate_singleton_inequalities=False,
                  perform_eliminate_dual_singleton_inequalities=False,
                  perform_eliminate_redundant_columns=False,
                  perform_eliminate_implied_bounds=False,
                  perform_eliminate_redundant_rows=False,
-                 perform_reduction_small_coefficients=False,
-                 perform_bound_strengthening=False):
+                 perform_reduction_small_coefficients=None,
+                 perform_bound_strengthening=None):
         """
         Initialize the presolve operations class with an optional optimization model.
 
@@ -35,10 +34,14 @@ class PresolveComillas:
         - model: An optimization model (e.g., a Gurobi model object) that presolve operations will be applied to.
         Default is None.
         """
+        if perform_eliminate_kton_equalities is None:
+            perform_eliminate_kton_equalities = {"val": False, "k": 5}
         self.model = model
 
         # input data for some operations
-        self.k = k  # kton equalities
+        self.k = perform_eliminate_kton_equalities['k']  # kton equalities
+        self.threshold_small = perform_reduction_small_coefficients['threshold_small']
+        self.practical_infinity = perform_bound_strengthening['practical_infinity']
 
         # boolean for presolve reductions
         self.perform_eliminate_zero_rows = perform_eliminate_zero_rows
@@ -52,8 +55,6 @@ class PresolveComillas:
         self.perform_eliminate_redundant_rows = perform_eliminate_redundant_rows
         self.perform_reduction_small_coefficients = perform_reduction_small_coefficients
         self.perform_bound_strengthening = perform_bound_strengthening
-
-        self.threshold_small = 0.1
 
         # Initialize placeholders for matrices and model components
         self.A = None
@@ -110,7 +111,7 @@ class PresolveComillas:
                 f"{str(datetime.now())}: Presolve operation: eliminate_redundant_rows")
             self.eliminate_redundant_rows()
 
-        if self.perform_eliminate_kton_equalities:
+        if self.perform_eliminate_kton_equalities['val']:
             log.info(
                 f"{str(datetime.now())}: Presolve operation: eliminate_kton_equalities, k = {self.k}")
             self.eliminate_kton_equalities()
@@ -145,12 +146,12 @@ class PresolveComillas:
                 f"{str(datetime.now())}: Presolve operation: eliminate_zero_columns")
             self.eliminate_zero_columns()
 
-        if self.perform_bound_strengthening:
+        if self.perform_bound_strengthening['val']:
             log.info(
                 f"{str(datetime.now())}: Presolve operation: bound_strengthening")
             self.bound_strengthening()
 
-        if self.perform_reduction_small_coefficients:
+        if self.perform_reduction_small_coefficients['val']:
             log.info(
                 f"{str(datetime.now())}: Presolve operation: reduction_small_coefficients")
             self.reduction_small_coefficients()
@@ -158,7 +159,7 @@ class PresolveComillas:
         return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
                 self.change_dictionary, self.operation_table)
 
-    def ockget_row_activities(self):
+    def get_row_activities(self):
         """
         Compute and return the support, minimal activity, and maximal activity for each row in a Gurobi model.
         Returns:
@@ -200,6 +201,41 @@ class PresolveComillas:
             SUP.append(max_activity)
 
         return SUPP, INF, SUP
+
+    def get_row_activities_fast(self):
+        """
+        Compute and return the support, minimal activity, and maximal activity for each row in a Gurobi model.
+        Returns:
+        support, min_activity, max_activity.
+        SUPP - support: Set of indices j where a_ij is non-zero.
+        INF - min_activity: Infimum of the row activity calculated as the sum of a_ij*l_j (for a_ij > 0) and a_ij*u_j (for a_ij < 0).
+        SUP - max_activity: Supremum of the row activity calculated as the sum of a_ij*u_j (for a_ij > 0) and a_ij*l_j (for a_ij < 0).
+        """
+
+        # Convert bounds to arrays for vectorized operations
+        lb_array = np.array(self.lb)
+        ub_array = np.array(self.ub)
+
+        # Replace -inf with a very large negative number and inf with a very large positive number for calculation
+        lb_array = np.where(np.isneginf(lb_array), -self.practical_infinity, lb_array)
+        ub_array = np.where(np.isposinf(ub_array), self.practical_infinity, ub_array)
+
+        # Calculate activities using vectorized operations
+        pos_activity = self.A.maximum(0)  # Positive part of A
+        neg_activity = self.A.minimum(0)  # Negative part of A
+
+        # Calculate minimum and maximum activity
+        min_activity = pos_activity.dot(lb_array) + neg_activity.dot(ub_array)
+        max_activity = pos_activity.dot(ub_array) + neg_activity.dot(lb_array)
+
+        # Update min_activity and max_activity based on practical infinity threshold
+        min_activity = np.where(min_activity <= -self.practical_infinity, -np.inf, min_activity)
+        max_activity = np.where(max_activity >= self.practical_infinity, np.inf, max_activity)
+
+        # Calculate support
+        SUPP = [set(row.nonzero()[1]) for row in self.A]
+
+        return SUPP, min_activity.flatten(), max_activity.flatten()
 
     def eliminate_zero_rows(self):
         """
@@ -910,7 +946,7 @@ class PresolveComillas:
             Modifies:
             - self.lb and self.ub are updated with tightened bounds where applicable.
             """
-        SUPP, INF, SUP = self.get_row_activities()
+        SUPP, INF, SUP = self.get_row_activities_fast()
 
         # condition for at least 2 elements in SUPP
         cond_1 = [len(s) >= 2 for s in SUPP]

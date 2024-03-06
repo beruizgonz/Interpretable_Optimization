@@ -52,6 +52,42 @@ def get_row_activities(model):
     return SUPP, INF, SUP
 
 
+def get_row_activities_fast(A, lb, ub):
+    """
+    Compute and return the support, minimal activity, and maximal activity for each row in a Gurobi model.
+    Returns:
+    support, min_activity, max_activity.
+    SUPP - support: Set of indices j where a_ij is non-zero.
+    INF - min_activity: Infimum of the row activity calculated as the sum of a_ij*l_j (for a_ij > 0) and a_ij*u_j (for a_ij < 0).
+    SUP - max_activity: Supremum of the row activity calculated as the sum of a_ij*u_j (for a_ij > 0) and a_ij*l_j (for a_ij < 0).
+    """
+    practical_infinity = 1e20
+    # Convert bounds to arrays for vectorized operations
+    lb_array = np.array(lb)
+    ub_array = np.array(ub)
+
+    # Replace -inf with a very large negative number and inf with a very large positive number for calculation
+    lb_array = np.where(np.isneginf(lb_array), -practical_infinity, lb_array)
+    ub_array = np.where(np.isposinf(ub_array), practical_infinity, ub_array)
+
+    # Calculate activities using vectorized operations
+    pos_activity = A.maximum(0)  # Positive part of A
+    neg_activity = A.minimum(0)  # Negative part of A
+
+    # Calculate minimum and maximum activity
+    min_activity = pos_activity.dot(lb_array) + neg_activity.dot(ub_array)
+    max_activity = pos_activity.dot(ub_array) + neg_activity.dot(lb_array)
+
+    # Update min_activity and max_activity based on practical infinity threshold
+    min_activity = np.where(min_activity <= -practical_infinity, -np.inf, min_activity)
+    max_activity = np.where(max_activity >= practical_infinity, np.inf, max_activity)
+
+    # Calculate support
+    SUPP = [set(row.nonzero()[1]) for row in A]
+
+    return SUPP, min_activity.flatten(), max_activity.flatten()
+
+
 def eliminate_implied_bounds(model, current_matrices_path, feasibility_tolerance=1e-6, infinity=1e30):
     """
     Analyzes each constraint in a Gurobi model and categorizes them as valid, redundant, or infeasible.

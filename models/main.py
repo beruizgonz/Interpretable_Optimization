@@ -7,6 +7,7 @@ from tabulate import tabulate
 from datetime import datetime
 
 from Interpretable_Optimization.models.utils_models.presolve_class import PresolveComillas
+from Interpretable_Optimization.models.utils_models.sensitivity_analysis import SensitivityAnalysis
 from Interpretable_Optimization.models.utils_models.utils_functions import create_original_model, get_model_matrices, \
     save_json, build_model_from_json, compare_models, normalize_features, matrix_sparsification, \
     sparsification_sensitivity_analysis, build_dual_model_from_json, \
@@ -31,14 +32,14 @@ if __name__ == "__main__":
     # ====================================== Defining initial configuration ============================================
     config = {"get_only_GAMS_info": {"val": False,
                                      "save_xls": False},
-              "get_only_GAMS_data": True,
+              "get_only_GAMS_data": False,
               "create_model": {"val": False,
                                "n_variables": 50000,
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'presolve',
                              "name": 'zero_rows.mps'},
-              "print_mathematical_format": True,
+              "print_mathematical_format": False,
               "original_primal_canonical": {"val": True,
                                             "MinMode": True},
               "solve_models": False,
@@ -49,22 +50,34 @@ if __name__ == "__main__":
               "save_original_model": {"val": False,
                                       "save_name": 'transp_singleton.mps',
                                       "save_path": 'models_library'},
-              "presolve": {"val": True,
+              "presolve": {"val": False,
                            "model_presolve": 'original_primal',
                            "presolve_operations": PresolveComillas(model=None,
-                                                                perform_eliminate_zero_rows=False,
-                                                                perform_eliminate_zero_columns=False,
-                                                                perform_eliminate_singleton_equalities=False,
-                                                                perform_eliminate_kton_equalities=False,
-                                                                k=2,
-                                                                perform_eliminate_singleton_inequalities=False,
-                                                                perform_eliminate_dual_singleton_inequalities=False,
-                                                                perform_eliminate_redundant_columns=False,
-                                                                perform_eliminate_implied_bounds=False,
-                                                                perform_eliminate_redundant_rows=False,
-                                                                perform_reduction_small_coefficients=True,
-                                                                perform_bound_strengthening=True)
-    }}
+                                                                   perform_eliminate_zero_rows=False,
+                                                                   perform_eliminate_zero_columns=False,
+                                                                   perform_eliminate_singleton_equalities=False,
+                                                                   perform_eliminate_kton_equalities={"val": False,
+                                                                                                      "k": 5},
+                                                                   perform_eliminate_singleton_inequalities=False,
+                                                                   perform_eliminate_dual_singleton_inequalities=False,
+                                                                   perform_eliminate_redundant_columns=False,
+                                                                   perform_eliminate_implied_bounds=False,
+                                                                   perform_eliminate_redundant_rows=False,
+                                                                   perform_reduction_small_coefficients={"val": True,
+                                                                                                         "threshold_small": 0.001},
+                                                                   perform_bound_strengthening={"val": False,
+                                                                                                "practical_infinity": 1e20}
+                                                                   )
+                           },
+              "sensitivity_analysis": {"val": True,
+                                       "model_sa": 'original_primal',
+                                       "sensitivity_operations": SensitivityAnalysis(model=None,
+                                                                                     save_path=k,
+                                                                                     perform_sa_reduction_of_small_coefficients={
+                                                                                         "val": True
+                                                                                         }
+                                                                                     )
+                                       }}
 
     # ================================================== Directories to work ===========================================
     log.info(
@@ -312,4 +325,3 @@ if __name__ == "__main__":
 
             print("===================== Model after presolve =====================")
             print_model_in_mathematical_format(model_after)
-
