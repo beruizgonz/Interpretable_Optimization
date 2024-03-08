@@ -37,8 +37,8 @@ if __name__ == "__main__":
                                "n_variables": 50000,
                                "n_constraints": 4},
               "load_model": {"val": True,
-                             "load_path": 'presolve',
-                             "name": 'zero_rows.mps'},
+                             "load_path": 'GAMS_library',
+                             "name": 'TRNSPORT.mps'},
               "print_mathematical_format": False,
               "original_primal_canonical": {"val": True,
                                             "MinMode": True},
@@ -65,8 +65,8 @@ if __name__ == "__main__":
                                                                    perform_eliminate_redundant_rows=False,
                                                                    perform_reduction_small_coefficients={"val": False,
                                                                                                          "threshold_small": 0.001},
-                                                                   perform_bound_strengthening={"val": True,
-                                                                                                "practical_infinity": 1e20}
+                                                                   perform_bound_strengthening=True,
+                                                                   practical_infinity=1e20
                                                                    )
                            },
               "sensitivity_analysis": {"val": False,

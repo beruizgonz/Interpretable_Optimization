@@ -1042,7 +1042,7 @@ def bound_strengthening(A, b, lb, ub):
 
     # Update the original upper bounds if the new calculated bounds are tighter
     for j in range(num_cols):
-        if (final_new_upper_bounds[j] < ub[j]) and (final_new_upper_bounds[j] > lb[j]):
+        if (final_new_upper_bounds[j] < ub[j]) and (final_new_upper_bounds[j] > lb[j]): #TODO infact
             ub[j] = final_new_upper_bounds[j]
         if (final_new_lower_bounds[j] > lb[j]) and (final_new_lower_bounds[j] < ub[j]):
             lb[j] = final_new_lower_bounds[j]

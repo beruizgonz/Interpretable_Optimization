@@ -26,7 +26,8 @@ class PresolveComillas:
                  perform_eliminate_implied_bounds=False,
                  perform_eliminate_redundant_rows=False,
                  perform_reduction_small_coefficients=None,
-                 perform_bound_strengthening=None):
+                 perform_bound_strengthening=False,
+                 practical_infinity=1e20):
         """
         Initialize the presolve operations class with an optional optimization model.
 
@@ -41,7 +42,7 @@ class PresolveComillas:
         # input data for some operations
         self.k = perform_eliminate_kton_equalities['k']  # kton equalities
         self.threshold_small = perform_reduction_small_coefficients['threshold_small']
-        self.practical_infinity = perform_bound_strengthening['practical_infinity']
+        self.practical_infinity = practical_infinity
 
         # boolean for presolve reductions
         self.perform_eliminate_zero_rows = perform_eliminate_zero_rows
@@ -146,7 +147,7 @@ class PresolveComillas:
                 f"{str(datetime.now())}: Presolve operation: eliminate_zero_columns")
             self.eliminate_zero_columns()
 
-        if self.perform_bound_strengthening['val']:
+        if self.perform_bound_strengthening:
             log.info(
                 f"{str(datetime.now())}: Presolve operation: bound_strengthening")
             self.bound_strengthening()
@@ -919,4 +920,67 @@ class PresolveComillas:
         self.operation_table.append(
             ("reduction Small Coefficients", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
+    def bound_strengthening(self):
+        """
+            Performs bound strengthening on decision variables of a linear programming (LP) problem.
+            This operation aims to tighten the lower and upper bounds of variables based on the
+            constraint matrix, right-hand side values, and existing bounds, potentially reducing the
+            feasible region and improving the efficiency of optimization algorithms.
+
+            The process involves analyzing each constraint to determine how the bounds of a variable
+            can be tightened without altering the feasible set of the LP problem. This is done by
+            calculating the minimum activity for each constraint (excluding the variable under
+            consideration) and using it to adjust the variable's bounds.
+        """
+
+        num_rows, num_cols = self.A.A.shape
+        min_activity_matrix = np.where(self.A.A >= 0, self.A.A * self.lb, self.A.A * self.ub)
+        max_activity_matrix = np.where(self.A.A <= 0, self.A.A * self.lb, self.A.A * self.ub)
+
+        # Initialize an empty array for the complementary_min_activity
+        complementary_min_activity = np.zeros_like(min_activity_matrix)
+        complementary_max_activity = np.zeros_like(max_activity_matrix)
+
+        # Use broadcasting to perform the operation for each column
+        for j in range(num_cols):
+            # Create a copy of min_activity_matrix and set the jth column to 0
+            modified_matrix_min = np.copy(min_activity_matrix)
+            modified_matrix_max = np.copy(max_activity_matrix)
+
+            modified_matrix_min[:, j] = 0  # Exclude column j from the sum
+            modified_matrix_max[:, j] = 0  # Exclude column j from the sum
+
+            # Sum over rows to calculate the complementary min activity for each element not considering column j
+            complementary_min_activity[:, j] = modified_matrix_min.sum(axis=1)
+            complementary_max_activity[:, j] = modified_matrix_max.sum(axis=1)
+
+        # Initialize the new_upper_bound_matrix with +inf
+        new_upper_bound_matrix = np.full_like(self.A.A, np.inf, dtype=np.float64)
+        new_lower_bound_matrix = np.full_like(self.A.A, -np.inf, dtype=np.float64)
+
+        # Iterate over each element in A to calculate the new upper bounds
+        for i in range(num_rows):
+            for j in range(num_cols):
+                a_ij = self.A.A[i, j]
+                if a_ij < 0:
+                    # Calculate new upper bound based on complementary min activity
+                    new_upper_bound_matrix[i, j] = (self.b[i] - complementary_min_activity[i, j]) / a_ij
+                elif a_ij > 0:
+                    # Calculate new upper bound based on complementary min activity
+                    new_lower_bound_matrix[i, j] = (self.b[i] - complementary_max_activity[i, j]) / a_ij
+
+        # Initialize a vector to hold the final new upper bounds for each variable
+        final_new_upper_bounds = np.full(num_cols, np.inf)
+        final_new_lower_bounds = np.full(num_cols, -np.inf)
+
+        for j in range(num_cols):
+            final_new_upper_bounds[j] = np.min(new_upper_bound_matrix[:, j])
+            final_new_lower_bounds[j] = np.max(new_lower_bound_matrix[:, j])
+
+        # Update the original upper bounds if the new calculated bounds are tighter
+        for j in range(num_cols):
+            if (final_new_upper_bounds[j] < self.ub[j]) and (final_new_upper_bounds[j] > self.lb[j]):
+                self.ub[j] = final_new_upper_bounds[j]
+            if (final_new_lower_bounds[j] > self.lb[j]) and (final_new_lower_bounds[j] < self.ub[j]):
+                self.lb[j] = final_new_lower_bounds[j]
 
