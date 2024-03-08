@@ -896,7 +896,7 @@ class PresolveComillas:
         The function concludes by updating an operation table with the current number of variables, constraints, and nonzero elements in the matrix, providing a summary of the problem size after the reduction operation.
         """
         A_norm, _, _ = normalize_features(self.A, self.b)
-        SUPP, _, _ = self.get_row_activities()
+        SUPP, _, _ = self.get_row_activities_fast()
         num_rows, num_cols = A_norm.shape
 
         for i in range(num_rows):
@@ -919,69 +919,4 @@ class PresolveComillas:
         self.operation_table.append(
             ("reduction Small Coefficients", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
-    def bound_strengthening(self):
-        """
-            Perform bound strengthening on the linear problem to tighten the variable bounds.
 
-            This method applies a preprocessing step that aims to reduce the feasible region of the problem
-            by tightening the upper and lower bounds of variables based on the constraints' coefficients.
-            It specifically targets rows with sufficient activity and potential for bound improvement
-            based on the presence of positive and negative coefficients.
-
-            Steps:
-            1. Determine the support set (SUPP) for each constraint, which includes indices of non-zero coefficients.
-            2. Apply three conditions to filter rows for bound tightening:
-                - Condition 1: The support set contains at least two elements, indicating a non-trivial constraint.
-                - Condition 2: There's at least one positive coefficient in the constraint, suggesting upward bound potential.
-                - Condition 3: At most one negative coefficient is present, aiming for straightforward bound adjustments.
-            3. For rows meeting all conditions, select a coefficient (`x_k`) to base the bound adjustment on:
-                - Prefer a negative coefficient if available, to adjust the upper bound of the corresponding variable.
-                - Otherwise, use any coefficient for potentially adjusting the lower bound.
-            4. Calculate and apply bound adjustments based on the selected coefficient and the constraint's RHS value (b[i]).
-
-            Note:
-            This method assumes that self.A.A represents the coefficient matrix, with rows corresponding to constraints
-            and columns to variables. The variables' current bounds are stored in self.lb (lower bounds) and self.ub (upper bounds).
-
-            Modifies:
-            - self.lb and self.ub are updated with tightened bounds where applicable.
-            """
-        SUPP, INF, SUP = self.get_row_activities_fast()
-
-        # condition for at least 2 elements in SUPP
-        cond_1 = [len(s) >= 2 for s in SUPP]
-
-        # condition for at least one positive in aij as support of the row
-        aij_supp = [{self.A.A[i, j] for j in s} for i, s in enumerate(SUPP)]
-        cond_2 = [any(element > 0 for element in row_set) for row_set in aij_supp]
-
-        # condition for on top 1 negative value as support
-        cond_3 = [len([element for element in row_set if element < 0]) <= 1 for row_set in aij_supp]
-
-        combined_condition = [c1 and c2 and c3 for c1, c2, c3 in zip(cond_1, cond_2, cond_3)]
-
-        num_rows, num_cols = self.A.A.shape
-
-        # Iterate over the constraints
-        for i in range(num_rows):
-            if combined_condition[i]:
-                # choosing x_k
-                # Filter for negative values in aij_supp for the current row
-                negative_values = [val for val in aij_supp[i] if val < 0]
-                if negative_values:
-                    x_k_choices = negative_values[0]  # Choose a negative value if available
-                    neg_cond = True
-                else:
-                    vector = list(aij_supp[i])
-                    neg_cond = False
-
-                if neg_cond:
-                    ub_k = self.b[i] / x_k_choices
-                    if (ub_k < self.ub[i]) and (ub_k > self.lb[i]):
-                        self.ub[i] = ub_k
-                else:
-                    for j in range(vector):
-                        x_k_choices = vector[j]
-                        lb_k = self.b[i] / x_k_choices
-                        if (lb_k > self.lb[i]) and (lb_k < self.ub[i]):
-                            self.lb[i] = lb_k

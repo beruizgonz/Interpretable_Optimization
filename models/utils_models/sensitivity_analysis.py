@@ -20,6 +20,7 @@ class SensitivityAnalysis:
     def __init__(self,
                  model=None,
                  save_path=None,
+                 practical_infinity=None,
                  perform_reduction_small_coefficients=None):
 
         """
@@ -27,10 +28,10 @@ class SensitivityAnalysis:
         """
         self.model = model
         self.save_path = save_path
-
-        self.practical_infinity = 1e20
+        self.practical_infinity = practical_infinity
         self.perform_reduction_small_coefficients = perform_reduction_small_coefficients
-        self.save_path = save_path
+
+        self.sa_dictionary = defaultdict(nested_dict)
 
     def load_model_matrices(self):
         """
@@ -60,9 +61,15 @@ class SensitivityAnalysis:
             log.info(
                 f"{str(datetime.now())}: Sensitivity Analysis: Small Coefficients")
             self.presolve_instance = PresolveComillas(model=self.model,
-                                                 perform_reduction_small_coefficients={"val": True,
-                                                                                       "threshold_small": None})
-            self.sens_anals_small_coeffs()
+                                                      perform_reduction_small_coefficients={"val": True,
+                                                                                            "threshold_small": None},
+                                                      perform_bound_strengthening={"val": False,
+                                                                                   "practical_infinity": 1e20}
+                                                      )
+            eps, of, dv, changed_indices, constraint_viol, of_dec = self.sens_anals_small_coeffs()
+            self.sa_dictionary['reduction_small_coefficients'] = eps, of, dv, changed_indices, constraint_viol, of_dec
+
+        return self.sa_dictionary
 
     def sens_anals_small_coeffs(self):
 
@@ -91,7 +98,7 @@ class SensitivityAnalysis:
 
         while threshold <= self.perform_reduction_small_coefficients['max_threshold']:
             self.presolve_instance.perform_reduction_small_coefficients['threshold_small'] = threshold
-            A, b, c, lb, ub, of_sense, cons_senses, co, variable_names, changes_dictionary, operation_table = (
+            self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names, _, _ = (
                 self.presolve_instance.orchestrator_presolve_operations())
 
             A_changed = self.A.A.copy()
@@ -101,7 +108,7 @@ class SensitivityAnalysis:
                        A_initial[i, j] != 0 and A_changed[i, j] == 0]
 
             # Save the matrices
-            save_json(A, b, c, lb, ub, of_sense, cons_senses, self.save_path, self.co, self.variable_names)
+            save_json(self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.save_path, self.co, self.variable_names)
 
             # Create a new model from the saved matrices
             iterative_model = build_model_from_json(self.save_path)
@@ -151,53 +158,49 @@ class SensitivityAnalysis:
 
             # Increment threshold
             threshold += self.perform_reduction_small_coefficients['step_threshold']
+        return eps, of, dv, changed_indices, constraint_viol, of_dec
 
-
-
-
-
-
-        # =================== Sensitivity analysis on matrix sparsification for different thresholds ===================
-        if config['sparsification_sa']['val']:
-            log.info(
-                f"{str(datetime.now())}: Sensitivity analysis on matrix sparsification for different thresholds:")
-
-        log.info(f"{datetime.now()}: Processing primal...")
-        eps_p, of_p, dv_p, ind_p, cviol_p, of_dec_p = sparsification_sensitivity_analysis(current_matrices_path,
-                                                                                          original_primal,
-                                                                                          config[
-                                                                                              'sparsification_sa'],
-                                                                                          model_to_use='primal')
-
-        log.info(f"{datetime.now()}: Processing dual...")
-
-        eps_d, of_d, dv_d, ind_d, cviol_d, of_dec_d = sparsification_sensitivity_analysis(current_matrices_path,
-                                                                                          created_dual,
-                                                                                          config[
-                                                                                              'sparsification_sa'],
-                                                                                          model_to_use='dual')
-
-        # Assign results to the 'primal' and 'dual' keys using dictionary unpacking
-        sparsification_results[model_name]['primal'] = {
-
-            'epsilon': eps_p,
-            'objective_function': of_p,
-            'decision_variables': dv_p,
-            'changed_indices': ind_p,
-            'constraint_violation': cviol_p,
-            'of_original_decision': of_dec_p
-
-        }
-
-
-sparsification_results[model_name]['dual'] = {
-    'epsilon': eps_d,
-    'objective_function': of_d,
-    'decision_variables': dv_d,
-    'changed_indices': ind_d,
-    'constraint_violation': cviol_d,
-    'of_original_decision': of_dec_d
-}
+#         # =================== Sensitivity analysis on matrix sparsification for different thresholds ===================
+#         if config['sparsification_sa']['val']:
+#             log.info(
+#                 f"{str(datetime.now())}: Sensitivity analysis on matrix sparsification for different thresholds:")
+#
+#         log.info(f"{datetime.now()}: Processing primal...")
+#         eps_p, of_p, dv_p, ind_p, cviol_p, of_dec_p = sparsification_sensitivity_analysis(current_matrices_path,
+#                                                                                           original_primal,
+#                                                                                           config[
+#                                                                                               'sparsification_sa'],
+#                                                                                           model_to_use='primal')
+#
+#         log.info(f"{datetime.now()}: Processing dual...")
+#
+#         eps_d, of_d, dv_d, ind_d, cviol_d, of_dec_d = sparsification_sensitivity_analysis(current_matrices_path,
+#                                                                                           created_dual,
+#                                                                                           config[
+#                                                                                               'sparsification_sa'],
+#                                                                                           model_to_use='dual')
+#
+#         # Assign results to the 'primal' and 'dual' keys using dictionary unpacking
+#         sparsification_results[model_name]['primal'] = {
+#
+#             'epsilon': eps_p,
+#             'objective_function': of_p,
+#             'decision_variables': dv_p,
+#             'changed_indices': ind_p,
+#             'constraint_violation': cviol_p,
+#             'of_original_decision': of_dec_p
+#
+#         }
+#
+#
+# sparsification_results[model_name]['dual'] = {
+#     'epsilon': eps_d,
+#     'objective_function': of_d,
+#     'decision_variables': dv_d,
+#     'changed_indices': ind_d,
+#     'constraint_violation': cviol_d,
+#     'of_original_decision': of_dec_d
+# }
 
 # if config['presolve_operations']['eliminate_zero_rows']:
 #     log.info(

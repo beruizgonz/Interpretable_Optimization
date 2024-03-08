@@ -981,3 +981,70 @@ def eliminate_redundant_rows(model, current_matrices_path):
     copied_model.update()
 
     return copied_model, feedback_constraint
+
+
+def bound_strengthening(A, b, lb, ub):
+    """
+        Performs bound strengthening on decision variables of a linear programming (LP) problem.
+        This operation aims to tighten the lower and upper bounds of variables based on the
+        constraint matrix, right-hand side values, and existing bounds, potentially reducing the
+        feasible region and improving the efficiency of optimization algorithms.
+
+        The process involves analyzing each constraint to determine how the bounds of a variable
+        can be tightened without altering the feasible set of the LP problem. This is done by
+        calculating the minimum activity for each constraint (excluding the variable under
+        consideration) and using it to adjust the variable's bounds.
+    """
+
+    num_rows, num_cols = A.shape
+    min_activity_matrix = np.where(A > 0, A * lb, A * ub)
+    max_activity_matrix = np.where(A > 0, A * ub, A * lb)
+
+    # Initialize an empty array for the complementary_min_activity
+    complementary_min_activity = np.zeros_like(min_activity_matrix)
+    complementary_max_activity = np.zeros_like(max_activity_matrix)
+
+    # Use broadcasting to perform the operation for each column
+    for j in range(num_cols):
+        # Create a copy of min_activity_matrix and set the jth column to 0
+        modified_matrix_min = np.copy(min_activity_matrix)
+        modified_matrix_max = np.copy(max_activity_matrix)
+
+        modified_matrix_min[:, j] = 0  # Exclude column j from the sum
+        modified_matrix_max[:, j] = 0  # Exclude column j from the sum
+
+        # Sum over rows to calculate the complementary min activity for each element not considering column j
+        complementary_min_activity[:, j] = modified_matrix_min.sum(axis=1)
+        complementary_max_activity[:, j] = modified_matrix_max.sum(axis=1)
+
+    # Initialize the new_upper_bound_matrix with +inf
+    new_upper_bound_matrix = np.full_like(A, np.inf, dtype=np.float64)
+    new_lower_bound_matrix = np.full_like(A, -np.inf, dtype=np.float64)
+
+    # Iterate over each element in A to calculate the new upper bounds
+    for i in range(num_rows):
+        for j in range(num_cols):
+            a_ij = A[i, j]
+            if a_ij < 0:
+                # Calculate new upper bound based on complementary min activity
+                new_upper_bound_matrix[i, j] = (b[i] - complementary_min_activity[i, j]) / a_ij
+            elif a_ij > 0:
+                # Calculate new upper bound based on complementary min activity
+                new_lower_bound_matrix[i, j] = (b[i] - complementary_max_activity[i, j]) / a_ij
+
+    # Initialize a vector to hold the final new upper bounds for each variable
+    final_new_upper_bounds = np.full(num_cols, np.inf)
+    final_new_lower_bounds = np.full(num_cols, -np.inf)
+
+    for j in range(num_cols):
+        final_new_upper_bounds[j] = np.min(new_upper_bound_matrix[:, j])
+        final_new_lower_bounds[j] = np.max(new_lower_bound_matrix[:, j])
+
+    # Update the original upper bounds if the new calculated bounds are tighter
+    for j in range(num_cols):
+        if (final_new_upper_bounds[j] < ub[j]) and (final_new_upper_bounds[j] > lb[j]):
+            ub[j] = final_new_upper_bounds[j]
+        if (final_new_lower_bounds[j] > lb[j]) and (final_new_lower_bounds[j] < ub[j]):
+            lb[j] = final_new_lower_bounds[j]
+
+    return lb, ub

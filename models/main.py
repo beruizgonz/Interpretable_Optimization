@@ -50,7 +50,7 @@ if __name__ == "__main__":
               "save_original_model": {"val": False,
                                       "save_name": 'transp_singleton.mps',
                                       "save_path": 'models_library'},
-              "presolve": {"val": False,
+              "presolve": {"val": True,
                            "model_presolve": 'original_primal',
                            "presolve_operations": PresolveComillas(model=None,
                                                                    perform_eliminate_zero_rows=False,
@@ -63,21 +63,25 @@ if __name__ == "__main__":
                                                                    perform_eliminate_redundant_columns=False,
                                                                    perform_eliminate_implied_bounds=False,
                                                                    perform_eliminate_redundant_rows=False,
-                                                                   perform_reduction_small_coefficients={"val": True,
+                                                                   perform_reduction_small_coefficients={"val": False,
                                                                                                          "threshold_small": 0.001},
-                                                                   perform_bound_strengthening={"val": False,
+                                                                   perform_bound_strengthening={"val": True,
                                                                                                 "practical_infinity": 1e20}
                                                                    )
                            },
-              "sensitivity_analysis": {"val": True,
+              "sensitivity_analysis": {"val": False,
                                        "model_sa": 'original_primal',
                                        "sensitivity_operations": SensitivityAnalysis(model=None,
-                                                                                     save_path=k,
-                                                                                     perform_sa_reduction_of_small_coefficients={
-                                                                                         "val": True
-                                                                                         }
+                                                                                     save_path=None,
+                                                                                     practical_infinity=1e20,
+                                                                                     perform_reduction_small_coefficients={
+                                                                                         "val": True,
+                                                                                         "init_threshold": 0.01,
+                                                                                         "step_threshold": 0.01,
+                                                                                         "max_threshold": 1}
                                                                                      )
-                                       }}
+                                       }
+              }
 
     # ================================================== Directories to work ===========================================
     log.info(
@@ -325,3 +329,22 @@ if __name__ == "__main__":
 
             print("===================== Model after presolve =====================")
             print_model_in_mathematical_format(model_after)
+
+        # ============================================== Sensitivity Analysis ==========================================
+
+        if config['sensitivity_analysis']['val']:
+            if config['sensitivity_analysis']['model_sa'] == 'original_primal':
+                log.info(
+                    f"{str(datetime.now())}: Sensitivity analysis with the original_primal...")
+                model_to_use = original_primal
+            else:
+                log.info(
+                    f"{str(datetime.now())}: Sensitivity analysis with the created_dual...")
+                model_to_use = created_dual
+
+            sa_instance = config['sensitivity_analysis']['sensitivity_operations']
+            sa_instance.model = model_to_use
+            sa_instance.save_path = current_matrices_path
+
+            sa_dictionary = (
+                sa_instance.orchestrator_sensitivity_operations())

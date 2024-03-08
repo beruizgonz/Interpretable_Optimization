@@ -16,6 +16,7 @@ from collections import defaultdict
 import pickle
 import pyomo.environ as pyo
 
+
 def nested_dict():
     """
     Create a nested defaultdict.
@@ -1684,7 +1685,7 @@ def gurobi_to_pyomo(gurobi_model):
     pyomo_model.cons = pyo.ConstraintList()
     for i in range(len(b)):
         row = A.getrow(i)  # Extract ith row from sparse matrix A
-        lhs_expr = sum(row[0,j] * pyomo_model.vars[variable_names[j]] for j in row.indices)
+        lhs_expr = sum(row[0, j] * pyomo_model.vars[variable_names[j]] for j in row.indices)
         if cons_senses[i] == '<':
             pyomo_model.cons.add(lhs_expr <= b[i])
         elif cons_senses[i] == '>':
@@ -1693,4 +1694,3 @@ def gurobi_to_pyomo(gurobi_model):
             pyomo_model.cons.add(lhs_expr == b[i])
 
     return pyomo_model
-

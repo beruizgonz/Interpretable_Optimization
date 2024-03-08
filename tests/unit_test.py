@@ -5,7 +5,7 @@ from gurobipy import GRB
 import numpy as np
 from scipy.sparse import csr_matrix
 import pyomo.environ as pyo
-from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities_fast
+from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities_fast, bound_strengthening
 
 
 class UtilsFunctionsTest(unittest.TestCase):
@@ -158,6 +158,34 @@ class UtilsFunctionsTest(unittest.TestCase):
                         "Min activity does not match expected results for -inf bounds.")
         self.assertTrue(np.all(np.isinf(max_activity) & (max_activity > 0)),
                         "Max activity does not match expected results for inf bounds.")
+
+    def test_bound_strengthening_basic(self):
+        A = np.array([[1, -1], [-1, 2]])
+        b = np.array([2, 4])
+        lb = np.array([0, 0])
+        ub = np.array([3, 3])
+
+        expected_lb = np.array([2, 2])
+        expected_ub = np.array([3, 3])
+
+        new_lb, new_ub = bound_strengthening(A, b, lb, ub)
+
+        np.testing.assert_array_almost_equal(new_lb, expected_lb, err_msg="Lower bounds did not match expected.")
+        np.testing.assert_array_almost_equal(new_ub, expected_ub, err_msg="Upper bounds did not match expected.")
+
+    def test_bound_strengthening_no_tightening(self):
+        A = np.array([[1, 2], [2, 1]])
+        b = np.array([5, 5])
+        lb = np.array([0, 0])
+        ub = np.array([10, 10])
+
+        expected_lb = lb  # No tightening expected
+        expected_ub = ub  # No tightening expected
+
+        new_lb, new_ub = bound_strengthening(A, b, lb, ub)
+
+        np.testing.assert_array_equal(new_lb, expected_lb, err_msg="Lower bounds changed unexpectedly.")
+        np.testing.assert_array_equal(new_ub, expected_ub, err_msg="Upper bounds changed unexpectedly.")
 
 
 if __name__ == '__main__':
