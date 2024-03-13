@@ -138,7 +138,7 @@ class UtilsFunctionsTest(unittest.TestCase):
         """
         Tests get_row_activities_fast with a matrix and bounds including extreme values (-np.inf, np.inf) to handle unbounded variables.
         """
-        import numpy as np
+
         # Define a matrix with coefficients and include a mix of bounded and unbounded variables
         A = csr_matrix([[1, -2], [3, 0], [-1, 4]])  # Sparse representation of the matrix
         lb = [-np.inf, 0]  # Lower bounds, first variable unbounded below

@@ -1,4 +1,5 @@
 import json
+import copy
 import os
 import gurobipy as gp
 import logging
@@ -17,12 +18,6 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json, canonical_form, nested_dict, \
     get_primal_decisions_to_excel, store_models_matrices
 
-from Interpretable_Optimization.models.utils_models.utils_presolve import get_row_activities, \
-    eliminate_implied_bounds, small_coefficient_reduction, eliminate_zero_columns, \
-    eliminate_singleton_equalities, eliminate_zero_rows, eliminate_doubleton_equalities, eliminate_kton_equalities, \
-    eliminate_singleton_inequalities, eliminate_dual_singleton_inequalities, eliminate_redundant_columns, \
-    eliminate_redundant_rows
-
 logging.basicConfig()
 log = logging.getLogger(__name__)
 log.setLevel('INFO')
@@ -38,7 +33,7 @@ if __name__ == "__main__":
                                "n_constraints": 4},
               "load_model": {"val": True,
                              "load_path": 'GAMS_library',
-                             "name": 'TRNSPORT.mps'},
+                             "name": 'all'},
               "print_mathematical_format": False,
               "original_primal_canonical": {"val": True,
                                             "MinMode": True},
@@ -50,8 +45,9 @@ if __name__ == "__main__":
               "save_original_model": {"val": False,
                                       "save_name": 'transp_singleton.mps',
                                       "save_path": 'models_library'},
-              "presolve": {"val": True,
+              "presolve": {"val": False,
                            "model_presolve": 'original_primal',
+                           "print_sol": False,
                            "presolve_operations": PresolveComillas(model=None,
                                                                    perform_eliminate_zero_rows=False,
                                                                    perform_eliminate_zero_columns=False,
@@ -63,22 +59,21 @@ if __name__ == "__main__":
                                                                    perform_eliminate_redundant_columns=False,
                                                                    perform_eliminate_implied_bounds=False,
                                                                    perform_eliminate_redundant_rows=False,
-                                                                   perform_reduction_small_coefficients={"val": False,
-                                                                                                         "threshold_small": 0.001},
-                                                                   perform_bound_strengthening=True,
+                                                                   perform_reduction_small_coefficients={"val": True,
+                                                                                                         "threshold_small": 0.1},
+                                                                   perform_bound_strengthening=False,
                                                                    practical_infinity=1e20
                                                                    )
                            },
-              "sensitivity_analysis": {"val": False,
-                                       "model_sa": 'original_primal',
+              "sensitivity_analysis": {"val": True,
                                        "sensitivity_operations": SensitivityAnalysis(model=None,
                                                                                      save_path=None,
                                                                                      practical_infinity=1e20,
                                                                                      perform_reduction_small_coefficients={
                                                                                          "val": True,
                                                                                          "init_threshold": 0.01,
-                                                                                         "step_threshold": 0.01,
-                                                                                         "max_threshold": 1}
+                                                                                         "step_threshold": 0.001,
+                                                                                         "max_threshold": 0.3}
                                                                                      )
                                        }
               }
@@ -318,33 +313,43 @@ if __name__ == "__main__":
                 f"{str(datetime.now())}:\n{tabulate(operation_table, headers=['Operation', 'Rows', 'Columns', 'Non-Zeros'], tablefmt='grid')}"
             )
 
-            print("===================== Original model =====================")
-            print_model_in_mathematical_format(original_primal_bp)
+            if config['presolve']['print_sol']:
 
-            print("===================== Model before presolve =====================")
-            print_model_in_mathematical_format(model_to_use)
+                print("===================== Original model =====================")
+                print_model_in_mathematical_format(original_primal_bp)
 
-            save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
-            model_after = build_model_from_json(current_matrices_path)
+                print("===================== Model before presolve =====================")
+                print_model_in_mathematical_format(model_to_use)
 
-            print("===================== Model after presolve =====================")
-            print_model_in_mathematical_format(model_after)
+                save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
+                model_after = build_model_from_json(current_matrices_path)
+
+                print("===================== Model after presolve =====================")
+                print_model_in_mathematical_format(model_after)
 
         # ============================================== Sensitivity Analysis ==========================================
 
         if config['sensitivity_analysis']['val']:
-            if config['sensitivity_analysis']['model_sa'] == 'original_primal':
-                log.info(
-                    f"{str(datetime.now())}: Sensitivity analysis with the original_primal...")
-                model_to_use = original_primal
-            else:
-                log.info(
-                    f"{str(datetime.now())}: Sensitivity analysis with the created_dual...")
-                model_to_use = created_dual
-
             sa_instance = config['sensitivity_analysis']['sensitivity_operations']
-            sa_instance.model = model_to_use
+            model_to_use_primal = original_primal
+            model_to_use_dual = created_dual
             sa_instance.save_path = current_matrices_path
 
-            sa_dictionary = (
-                sa_instance.orchestrator_sensitivity_operations())
+            # For the primal model
+            log.info(
+                f"{str(datetime.now())}:Sensitivity Analysis with primal model..."
+            )
+            sa_instance_primal = copy.deepcopy(sa_instance)
+            sa_instance_primal.model = model_to_use_primal
+            sparsification_results[model_name]['primal'] = sa_instance_primal.orchestrator_sensitivity_operations()
+
+            # For the dual model
+            log.info(
+                f"{str(datetime.now())}:Sensitivity Analysis with dual model..."
+            )
+            sa_instance_dual = copy.deepcopy(sa_instance)
+            sa_instance_dual.model = model_to_use_dual
+            sparsification_results[model_name]['dual'] = sa_instance_primal.orchestrator_sensitivity_operations()
+
+    # Saving the dictionary
+    dict2json(sparsification_results, 'sparsification_results.json')

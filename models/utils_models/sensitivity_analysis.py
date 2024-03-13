@@ -57,21 +57,29 @@ class SensitivityAnalysis:
         # Ensure matrices are loaded
         self.load_model_matrices()
 
+        sparsification_results = defaultdict(nested_dict)
+
         if self.perform_reduction_small_coefficients['val']:
             log.info(
                 f"{str(datetime.now())}: Sensitivity Analysis: Small Coefficients")
-            self.presolve_instance = PresolveComillas(model=self.model,
-                                                      perform_reduction_small_coefficients={"val": True,
-                                                                                            "threshold_small": None},
-                                                      perform_bound_strengthening={"val": False,
-                                                                                   "practical_infinity": 1e20}
-                                                      )
-            eps, of, dv, changed_indices, constraint_viol, of_dec = self.sens_anals_small_coeffs()
-            self.sa_dictionary['reduction_small_coefficients'] = eps, of, dv, changed_indices, constraint_viol, of_dec
+            presolve_instance = PresolveComillas(model=self.model,
+                                                 perform_reduction_small_coefficients={"val": True,
+                                                                                       "threshold_small": None},
+                                                 perform_bound_strengthening=False
+                                                 )
+            eps, of, dv, changed_indices, constraint_viol, of_dec = self.sens_anals_small_coeffs(presolve_instance)
+            sparsification_results = {
+                'epsilon': eps,
+                'objective_function': of,
+                'decision_variables': dv,
+                'changed_indices': changed_indices,
+                'constraint_violation': constraint_viol,
+                'of_original_decision': of_dec
+            }
 
-        return self.sa_dictionary
+        return sparsification_results
 
-    def sens_anals_small_coeffs(self):
+    def sens_anals_small_coeffs(self, presolve_instance):
 
         # Initialize lists to store results
         self.model.setParam('OutputFlag', 0)
@@ -97,9 +105,9 @@ class SensitivityAnalysis:
         threshold = self.perform_reduction_small_coefficients['init_threshold']
 
         while threshold <= self.perform_reduction_small_coefficients['max_threshold']:
-            self.presolve_instance.perform_reduction_small_coefficients['threshold_small'] = threshold
-            self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names, _, _ = (
-                self.presolve_instance.orchestrator_presolve_operations())
+            presolve_instance.perform_reduction_small_coefficients['threshold_small'] = threshold
+            (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
+             changes_dictionary, operation_table) = (presolve_instance.orchestrator_presolve_operations())
 
             A_changed = self.A.A.copy()
 
@@ -108,7 +116,8 @@ class SensitivityAnalysis:
                        A_initial[i, j] != 0 and A_changed[i, j] == 0]
 
             # Save the matrices
-            save_json(self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.save_path, self.co, self.variable_names)
+            save_json(self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.save_path,
+                      self.co, self.variable_names)
 
             # Create a new model from the saved matrices
             iterative_model = build_model_from_json(self.save_path)

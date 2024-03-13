@@ -5,6 +5,7 @@ from Interpretable_Optimization.models.utils_models.utils_functions import get_m
     matrix_sparsification
 from collections import defaultdict
 import warnings
+warnings.filterwarnings("ignore", category=RuntimeWarning)
 from datetime import datetime
 import logging
 
@@ -27,6 +28,7 @@ class PresolveComillas:
                  perform_eliminate_redundant_rows=False,
                  perform_reduction_small_coefficients=None,
                  perform_bound_strengthening=False,
+                 print_logs=False,
                  practical_infinity=1e20):
         """
         Initialize the presolve operations class with an optional optimization model.
@@ -41,7 +43,6 @@ class PresolveComillas:
 
         # input data for some operations
         self.k = perform_eliminate_kton_equalities['k']  # kton equalities
-        self.threshold_small = perform_reduction_small_coefficients['threshold_small']
         self.practical_infinity = practical_infinity
 
         # boolean for presolve reductions
@@ -56,6 +57,7 @@ class PresolveComillas:
         self.perform_eliminate_redundant_rows = perform_eliminate_redundant_rows
         self.perform_reduction_small_coefficients = perform_reduction_small_coefficients
         self.perform_bound_strengthening = perform_bound_strengthening
+        self.print_logs = print_logs
 
         # Initialize placeholders for matrices and model components
         self.A = None
@@ -103,58 +105,69 @@ class PresolveComillas:
         self.load_model_matrices()
 
         if self.perform_eliminate_implied_bounds:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: eliminate_implied_bounds")
+            if self.print_logs:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operation: eliminate_implied_bounds")
             self.eliminate_implied_bounds()
 
         if self.perform_eliminate_redundant_rows:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: eliminate_redundant_rows")
+            if self.print_logs:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operation: eliminate_redundant_rows")
             self.eliminate_redundant_rows()
 
         if self.perform_eliminate_kton_equalities['val']:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: eliminate_kton_equalities, k = {self.k}")
+            if self.print_logs:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operation: eliminate_kton_equalities, k = {self.k}")
             self.eliminate_kton_equalities()
 
         if self.perform_eliminate_singleton_equalities:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: eliminate_singleton_equalities")
+            if self.print_logs:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operation: eliminate_singleton_equalities")
             self.eliminate_singleton_equalities()
 
         if self.perform_eliminate_singleton_inequalities:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: eliminate_singleton_inequalities")
+            if self.print_logs:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operation: eliminate_singleton_inequalities")
             self.eliminate_singleton_inequalities()
 
         if self.perform_eliminate_dual_singleton_inequalities:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: eliminate_dual_singleton_inequalities")
+            if self.print_logs:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operation: eliminate_dual_singleton_inequalities")
             self.eliminate_dual_singleton_inequalities()
 
         if self.perform_eliminate_redundant_columns:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: eliminate_redundant_columns")
+            if self.print_logs:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operation: eliminate_redundant_columns")
             self.eliminate_redundant_columns()
 
         if self.perform_eliminate_zero_rows:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: eliminate_zero_rows")
+            if self.print_logs:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operation: eliminate_zero_rows")
             self.eliminate_zero_rows()
 
         if self.perform_eliminate_zero_columns:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: eliminate_zero_columns")
+            if self.print_logs:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operation: eliminate_zero_columns")
             self.eliminate_zero_columns()
 
         if self.perform_bound_strengthening:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: bound_strengthening")
+            if self.print_logs:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operation: bound_strengthening")
             self.bound_strengthening()
 
         if self.perform_reduction_small_coefficients['val']:
-            log.info(
-                f"{str(datetime.now())}: Presolve operation: reduction_small_coefficients")
+            if self.print_logs:
+                log.info(
+                    f"{str(datetime.now())}: Presolve operation: reduction_small_coefficients")
             self.reduction_small_coefficients()
 
         return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
@@ -896,10 +909,12 @@ class PresolveComillas:
 
         The function concludes by updating an operation table with the current number of variables, constraints, and nonzero elements in the matrix, providing a summary of the problem size after the reduction operation.
         """
+        self.bound_strengthening()
+        red_coef = 0
         A_norm, _, _ = normalize_features(self.A, self.b)
         SUPP, _, _ = self.get_row_activities_fast()
         num_rows, num_cols = A_norm.shape
-
+        aux = []
         for i in range(num_rows):
             if np.isfinite(self.ub[i]):
                 for j in range(num_cols):
@@ -907,14 +922,21 @@ class PresolveComillas:
                     u_j = self.ub[j]
                     l_j = self.lb[j]
                     # Compute conditions
-                    cond_1 = abs(a_ij) < self.threshold_small
+                    cond_1 = abs(a_ij) < self.perform_reduction_small_coefficients['threshold_small']
                     supp_size = len([x for x in A_norm.A[i, :] if x != 0])
-                    cond_2 = abs(a_ij) * (u_j - l_j) * supp_size < 10 ** -2 * self.threshold_small
-
+                    # cond_2 = abs(a_ij) * (u_j - l_j) < supp_size*self.perform_reduction_small_coefficients['threshold_small']
+                    cond_2 = True
                     # Apply conditions
                     if cond_1 and cond_2:
-                        self.b[i] = self.b[i] - self.A[i, j] * l_j
-                        self.A[i, j] = 0
+                        self.b[i] = self.b[i] - self.A.A[i, j] * l_j
+                        A_lil = self.A.tolil()
+                        A_lil[i, j] = 0
+                        self.A = A_lil.tocsr()
+                        red_coef += 1
+
+        # Update change_dictionary with the information about deleted elements
+        self.change_dictionary['reduction_small_coefficients']['reduced_coefficients'] = (
+            red_coef)
 
         # Update operation table with the number of variables and constraints after this operation
         self.operation_table.append(
@@ -932,10 +954,12 @@ class PresolveComillas:
             calculating the minimum activity for each constraint (excluding the variable under
             consideration) and using it to adjust the variable's bounds.
         """
-
+        bound_strengthened = 0
         num_rows, num_cols = self.A.A.shape
-        min_activity_matrix = np.where(self.A.A >= 0, self.A.A * self.lb, self.A.A * self.ub)
-        max_activity_matrix = np.where(self.A.A <= 0, self.A.A * self.lb, self.A.A * self.ub)
+        min_activity_matrix = np.where(self.A.A < 0, -self.A.A * self.lb,
+                                       np.where(self.A.A > 0, -self.A.A * self.ub, 0))
+        max_activity_matrix = np.where(self.A.A > 0, -self.A.A * self.lb,
+                                       np.where(self.A.A < 0, -self.A.A * self.ub, 0))
 
         # Initialize an empty array for the complementary_min_activity
         complementary_min_activity = np.zeros_like(min_activity_matrix)
@@ -964,10 +988,10 @@ class PresolveComillas:
                 a_ij = self.A.A[i, j]
                 if a_ij < 0:
                     # Calculate new upper bound based on complementary min activity
-                    new_upper_bound_matrix[i, j] = (self.b[i] - complementary_min_activity[i, j]) / a_ij
+                    new_upper_bound_matrix[i, j] = (-1*self.b[i] - complementary_min_activity[i, j]) / (-1*a_ij)
                 elif a_ij > 0:
                     # Calculate new upper bound based on complementary min activity
-                    new_lower_bound_matrix[i, j] = (self.b[i] - complementary_max_activity[i, j]) / a_ij
+                    new_lower_bound_matrix[i, j] = (-1*self.b[i] - complementary_min_activity[i, j]) / (-1*a_ij)
 
         # Initialize a vector to hold the final new upper bounds for each variable
         final_new_upper_bounds = np.full(num_cols, np.inf)
@@ -981,6 +1005,15 @@ class PresolveComillas:
         for j in range(num_cols):
             if (final_new_upper_bounds[j] < self.ub[j]) and (final_new_upper_bounds[j] > self.lb[j]):
                 self.ub[j] = final_new_upper_bounds[j]
+                bound_strengthened += 1
             if (final_new_lower_bounds[j] > self.lb[j]) and (final_new_lower_bounds[j] < self.ub[j]):
                 self.lb[j] = final_new_lower_bounds[j]
+                bound_strengthened += 1
 
+        # Update change_dictionary with the information about changed elements
+        self.change_dictionary['bound_strengthening']['bound_strengthened'] = (
+            bound_strengthened)
+
+        # Update operation table with the number of variables and constraints after this operation
+        self.operation_table.append(
+            ("Bound Strengthening", len(self.cons_senses), len(self.variable_names), self.A.nnz))
