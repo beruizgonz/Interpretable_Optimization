@@ -914,25 +914,20 @@ class PresolveComillas:
         A_norm, _, _ = normalize_features(self.A, self.b)
         SUPP, _, _ = self.get_row_activities_fast()
         num_rows, num_cols = A_norm.shape
-        aux = []
         for i in range(num_rows):
-            if np.isfinite(self.ub[i]):
-                for j in range(num_cols):
-                    a_ij = A_norm.A[i, j]
-                    u_j = self.ub[j]
-                    l_j = self.lb[j]
-                    # Compute conditions
-                    cond_1 = abs(a_ij) < self.perform_reduction_small_coefficients['threshold_small']
-                    supp_size = len([x for x in A_norm.A[i, :] if x != 0])
-                    # cond_2 = abs(a_ij) * (u_j - l_j) < supp_size*self.perform_reduction_small_coefficients['threshold_small']
-                    cond_2 = True
-                    # Apply conditions
-                    if cond_1 and cond_2:
-                        self.b[i] = self.b[i] - self.A.A[i, j] * l_j
-                        A_lil = self.A.tolil()
-                        A_lil[i, j] = 0
-                        self.A = A_lil.tocsr()
-                        red_coef += 1
+            for j in range(num_cols):
+                a_ij = A_norm.A[i, j]
+                l_j = self.lb[j]
+                # Compute conditions
+                cond = abs(a_ij) < self.perform_reduction_small_coefficients['threshold_small']
+
+                # Apply conditions
+                if cond:
+                    self.b[i] = self.b[i] - self.A.A[i, j] * l_j
+                    A_lil = self.A.tolil()
+                    A_lil[i, j] = 0
+                    self.A = A_lil.tocsr()
+                    red_coef += 1
 
         # Update change_dictionary with the information about deleted elements
         self.change_dictionary['reduction_small_coefficients']['reduced_coefficients'] = (
