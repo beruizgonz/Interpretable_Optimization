@@ -9,6 +9,7 @@ from Interpretable_Optimization.models.utils_models.presolve_class import Presol
 from Interpretable_Optimization.models.utils_models.utils_functions import nested_dict, get_model_matrices, \
     measuring_constraint_infeasibility, save_json, build_model_from_json
 import numpy as np
+import math
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -67,14 +68,15 @@ class SensitivityAnalysis:
                                                                                        "threshold_small": None},
                                                  perform_bound_strengthening=False
                                                  )
-            eps, of, dv, changed_indices, constraint_viol, of_dec = self.sens_anals_small_coeffs(presolve_instance)
+            eps, of, dv, changed_indices, constraint_viol, of_dec, execution_time = self.sens_anals_small_coeffs(presolve_instance)
             sparsification_results = {
                 'epsilon': eps,
                 'objective_function': of,
                 'decision_variables': dv,
                 'changed_indices': changed_indices,
                 'constraint_violation': constraint_viol,
-                'of_original_decision': of_dec
+                'of_original_decision': of_dec,
+                'execution_time': execution_time
             }
 
         return sparsification_results
@@ -85,6 +87,7 @@ class SensitivityAnalysis:
         self.model.setParam('OutputFlag', 0)
         self.model.optimize()
         eps = [0]  # Start with 0 threshold
+        execution_time = [0]
         dv = [np.array([var.x for var in self.model.getVars()])]  # Start with decision variables of original model
         changed_indices = [None]  # List to store indices changed at each threshold
         abs_vio, obj_val = measuring_constraint_infeasibility(self.model, dv[0])
@@ -96,15 +99,20 @@ class SensitivityAnalysis:
         A_initial = self.A.A.copy()
         original_model = self.model.copy()
 
-        # Calculate total iterations
-        total_iterations = (
-                int((self.perform_reduction_small_coefficients['max_threshold'] -
-                     self.perform_reduction_small_coefficients['init_threshold']) /
-                    self.perform_reduction_small_coefficients['step_threshold']) + 1)
+        # Calculate total iterations for exponential growth
+        total_iterations = math.ceil(
+            math.log(
+                self.perform_reduction_small_coefficients['max_threshold'] /
+                self.perform_reduction_small_coefficients['init_threshold']
+            ) / math.log(
+                1 + self.perform_reduction_small_coefficients['step_threshold']
+            )
+        )
 
         threshold = self.perform_reduction_small_coefficients['init_threshold']
 
         while threshold <= self.perform_reduction_small_coefficients['max_threshold']:
+            start_time = datetime.now()
             presolve_instance.perform_reduction_small_coefficients['threshold_small'] = threshold
             (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
              changes_dictionary, operation_table) = (presolve_instance.orchestrator_presolve_operations())
@@ -166,10 +174,12 @@ class SensitivityAnalysis:
             iteration += 1  # Increment iteration counter
 
             # Increment threshold
-            threshold += self.perform_reduction_small_coefficients['step_threshold']
-        return eps, of, dv, changed_indices, constraint_viol, of_dec
+            threshold += self.perform_reduction_small_coefficients['step_threshold']*threshold
 
-#         # =================== Sensitivity analysis on matrix sparsification for different thresholds ===================
+            execution_time.append(datetime.now() - start_time)
+        return eps, of, dv, changed_indices, constraint_viol, of_dec, execution_time
+
+#         # =================== Sensitivity analysis on matrix sparsification for different thresholds =================
 #         if config['sparsification_sa']['val']:
 #             log.info(
 #                 f"{str(datetime.now())}: Sensitivity analysis on matrix sparsification for different thresholds:")

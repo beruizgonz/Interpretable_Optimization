@@ -909,7 +909,7 @@ class PresolveComillas:
 
         The function concludes by updating an operation table with the current number of variables, constraints, and nonzero elements in the matrix, providing a summary of the problem size after the reduction operation.
         """
-        self.bound_strengthening()
+        #self.bound_strengthening()
         red_coef = 0
         A_norm, _, _ = normalize_features(self.A, self.b)
         SUPP, _, _ = self.get_row_activities_fast()

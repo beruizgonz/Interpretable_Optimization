@@ -1,4 +1,5 @@
 import json
+import time
 import copy
 import os
 import gurobipy as gp
@@ -17,7 +18,7 @@ from Interpretable_Optimization.models.utils_models.utils_functions import creat
     print_model_in_mathematical_format, visual_join_sensitivity, \
     measuring_constraint_infeasibility, quality_check, sparsification_test, constraint_reduction_test, get_info_GAMS, \
     detailed_info_models, rhs_sensitivity, cost_function_sensitivity, dict2json, canonical_form, nested_dict, \
-    get_primal_decisions_to_excel, store_models_matrices
+    get_primal_decisions_to_excel, store_models_matrices, get_model_in_mathematical_format
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -29,6 +30,9 @@ if __name__ == "__main__":
     config = {"get_only_GAMS_info": {"val": False,
                                      "save_xls": False},
               "get_only_GAMS_data": False,
+              "skip_big_models": {"val": True,
+                                  "n_constraints": 300,
+                                  "n_variables": 300},
               "create_model": {"val": False,
                                "n_variables": 50000,
                                "n_constraints": 4},
@@ -72,8 +76,8 @@ if __name__ == "__main__":
                                                                                      practical_infinity=1e20,
                                                                                      perform_reduction_small_coefficients={
                                                                                          "val": True,
-                                                                                         "init_threshold": 0.01,
-                                                                                         "step_threshold": 0.01,
+                                                                                         "init_threshold": 0.0015,
+                                                                                         "step_threshold": 0.2,
                                                                                          "max_threshold": 0.3}
                                                                                      )
                                        }
@@ -103,7 +107,7 @@ if __name__ == "__main__":
     if config['get_only_GAMS_data']:
         gams_path = os.path.join(data_path, 'GAMS_library')
         # store_models_matrices(gams_path)
-        data = store_models_matrices(gams_path, action='load')
+        data = store_models_matrices(gams_path)
         sys.exit()
 
     # ================================= Creating or loading the original_primal model ==================================
@@ -154,16 +158,17 @@ if __name__ == "__main__":
 
             log.info(f"{datetime.now()}: Processing Model {index} of {total_models} - {model_name}")
 
-            # ============================================ Standardization of the model ====================================
+            # ========================================== Standardization of the model ==================================
             log.info(
                 f"{str(datetime.now())}: Standardization of the model...")
             if config["original_primal_canonical"]["val"]:
                 original_primal, track_elements = canonical_form(original_primal_bp,
-                                                                 minOption=config["original_primal_canonical"]["MinMode"])
+                                                                 minOption=config["original_primal_canonical"][
+                                                                     "MinMode"])
             else:
                 original_primal = pre_processing_model(original_primal_bp)
 
-            # ======================================= saving the original_primal model in the path =========================
+            # ===================================== saving the original_primal model in the path =======================
             if config["save_original_model"]["val"]:
                 log.info(
                     f"{str(datetime.now())}: Saving the original_primal...")
@@ -172,18 +177,18 @@ if __name__ == "__main__":
                 model_to_save = os.path.join(s_path, config["save_original_model"]["save_name"])
                 original_primal_bp.write(model_to_save)
 
-            # ================================= Getting matrices and data of the original model ============================
+            # ================================ Getting matrices and data of the original model =========================
             log.info(
                 f"{str(datetime.now())}: Accessing matrix A, right-hand side b, cost function c, and the bounds of "
                 f"the original model...")
             A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
 
-            # ====================================== Saving matrices as json in the path ===================================
+            # ==================================== Saving matrices as json in the path =================================
             log.info(
                 f"{str(datetime.now())}: Saving A, b, c, lb and ub...")
             save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
 
-            # ============================= Creating the primal and the dual models from json files ========================
+            # =========================== Creating the primal and the dual models from json files ======================
             log.info(
                 f"{str(datetime.now())}: Creating primal model by loading A, b, c, lb and ub...")
             created_primal = build_model_from_json(current_matrices_path)
@@ -201,7 +206,16 @@ if __name__ == "__main__":
             save_json(A_norm, b_norm, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
             created_primal_norm = build_model_from_json(current_matrices_path)
 
-            # ====================================== Printing model in mathematical format =================================
+            # ============================================== big models test ===========================================
+            if config['skip_big_models']['val']:
+                num_rows, num_cols = A.shape
+                if (num_rows > config['skip_big_models']['n_constraints']) or (
+                        num_cols > config['skip_big_models']['n_variables']):
+                    log.info(
+                        f"{str(datetime.now())}: Skipping the model with {num_cols} variables and {num_rows} constraints...")
+                    continue
+
+            # ==================================== Printing model in mathematical format ===============================
             if config['print_mathematical_format']:
                 log.info(
                     f"{str(datetime.now())}: Printing detailed mathematical formulations...")
@@ -217,7 +231,7 @@ if __name__ == "__main__":
                 print("==================== Dual model created from matrices ==================== ")
                 print_model_in_mathematical_format(created_dual)
 
-            # ========== solving all models: original_primal_bp, original_primal, created_primal and created_dual ==========
+            # ======== solving all models: original_primal_bp, original_primal, created_primal and created_dual ========
 
             if config['solve_models']:
                 log.info(
@@ -274,13 +288,14 @@ if __name__ == "__main__":
                     print(f"Warning: Optimal solution was not found.")
                     created_dual_sol = None
 
-            # ============================== Comparing solutions: original_primal X created_primal =========================
+            # ============================ Comparing solutions: original_primal X created_primal =======================
 
             # printing detailed information about the models
             if config['print_detail_sol']:
                 log.info(
                     f"{str(datetime.now())}: Printing detailed solution")
-                detailed_info_models(original_primal_bp, original_primal, created_primal, created_primal_norm, created_dual)
+                detailed_info_models(original_primal_bp, original_primal, created_primal, created_primal_norm,
+                                     created_dual)
 
             # Saving primal decision variables to excel to comparison
             if config['primal_decisions2excel']:
@@ -288,14 +303,14 @@ if __name__ == "__main__":
                     f"{str(datetime.now())}: Saving primal solution to excel")
                 file_path = get_primal_decisions_to_excel([original_primal, created_primal, created_primal_norm])
 
-            # ================================================== Quality check =============================================
+            # ================================================ Quality check ===========================================
             if config['quality_check']:
                 quality_check(original_primal_bp, original_primal, created_primal, created_primal_norm, created_dual,
                               tolerance=1e-2)
                 log.info(
                     f"{str(datetime.now())}: Quality check passed...")
 
-            # =============================================== Presolve operations ==========================================
+            # ============================================= Presolve operations ========================================
             if config['presolve']['val']:
                 if config['presolve']['model_presolve'] == 'original_primal':
                     log.info(
@@ -317,7 +332,6 @@ if __name__ == "__main__":
                 )
 
                 if config['presolve']['print_sol']:
-
                     print("===================== Original model =====================")
                     print_model_in_mathematical_format(original_primal_bp)
 
@@ -330,7 +344,7 @@ if __name__ == "__main__":
                     print("===================== Model after presolve =====================")
                     print_model_in_mathematical_format(model_after)
 
-            # ============================================== Sensitivity Analysis ==========================================
+            # ============================================ Sensitivity Analysis ========================================
 
             if config['sensitivity_analysis']['val']:
                 sa_instance = config['sensitivity_analysis']['sensitivity_operations']
@@ -344,7 +358,12 @@ if __name__ == "__main__":
                 )
                 sa_instance_primal = copy.deepcopy(sa_instance)
                 sa_instance_primal.model = model_to_use_primal
+
+                start_time = time.time()
                 sparsification_results[model_name]['primal'] = sa_instance_primal.orchestrator_sensitivity_operations()
+                sparsification_results[model_name]['primal']['time_required'] = time.time() - start_time
+                sparsification_results[model_name]['primal']['mathematical_model'] = get_model_in_mathematical_format(
+                    model_to_use_primal)
 
                 # For the dual model
                 log.info(
@@ -352,7 +371,12 @@ if __name__ == "__main__":
                 )
                 sa_instance_dual = copy.deepcopy(sa_instance)
                 sa_instance_dual.model = model_to_use_dual
+
+                start_time = time.time()
                 sparsification_results[model_name]['dual'] = sa_instance_dual.orchestrator_sensitivity_operations()
+                sparsification_results[model_name]['dual']['time_required'] = time.time() - start_time
+                sparsification_results[model_name]['dual']['mathematical_model'] = get_model_in_mathematical_format(
+                    model_to_use_dual)
 
             # Saving the dictionary
             dict2json(sparsification_results, 'sparsification_results.json')

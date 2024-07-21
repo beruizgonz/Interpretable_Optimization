@@ -15,6 +15,7 @@ from scipy.sparse import issparse
 from collections import defaultdict
 import pickle
 import pyomo.environ as pyo
+from datetime import timedelta
 
 
 def nested_dict():
@@ -922,6 +923,41 @@ def print_model_in_mathematical_format(model):
     print(bounds)
 
 
+def get_model_in_mathematical_format(model):
+    """
+    Returns a Gurobi model in a mathematical format as a string.
+
+    Parameters:
+    - model (gurobipy.Model): The Gurobi model to be formatted.
+    """
+    result = ""
+
+    # Format the objective function
+    objective = '\nMinimize\n' if model.ModelSense == 1 else '\nMaximize\n'
+    objective += str(model.getObjective()) + '\n'
+
+    # Format the constraints
+    constraints = 'Subject To\n'
+    for constr in model.getConstrs():
+        sense = constr.Sense
+        if sense == '<':
+            sense = '≤'
+        elif sense == '>':
+            sense = '≥'
+        constraints += str(model.getRow(constr)) + ' ' + sense + ' ' + str(constr.RHS) + '\n'
+
+    # Format variable bounds (if they are not default 0 and infinity)
+    bounds = 'Bounds\n'
+    for var in model.getVars():
+        lb = '-inf' if var.LB <= -gp.GRB.INFINITY else str(var.LB)
+        ub = '+inf' if var.UB >= gp.GRB.INFINITY else str(var.UB)
+        bounds += f'{lb} <= {var.VarName} <= {ub}\n'
+
+    # Compile the full model description
+    result += objective + constraints + bounds
+    return result
+
+
 def quality_check(original_primal_bp, original_primal, created_primal, created_primal_norm, created_dual,
                   tolerance=1e-6):
     """
@@ -1256,6 +1292,8 @@ def dict2json(dictionary, file_path):
     def convert_ndarray(obj):
         if isinstance(obj, np.ndarray):
             return obj.tolist()
+        elif isinstance(obj, timedelta):
+            return str(obj)
         raise TypeError("Object of type '%s' is not JSON serializable" % type(obj).__name__)
 
     # Convert and save as JSON
@@ -1425,7 +1463,7 @@ def canonical_form(model, minOption=False):
                         new_expr.addTerms([var_coeff, -var_coeff], [x_pos, x_neg])
 
                         # Update the constraint with the new expression
-                        new_constr_name = f"{constr.ConstrName}_mod"
+                        new_constr_name = f"{constr.ConstrName}_c"
                         if constr.Sense == gp.GRB.LESS_EQUAL:
                             canonical_model.addConstr(new_expr <= constr.RHS, name=new_constr_name)
                         elif constr.Sense == gp.GRB.GREATER_EQUAL:
@@ -1611,7 +1649,7 @@ def get_primal_decisions_to_excel(models):
     return file_name
 
 
-def store_models_matrices(path, action='store'):
+def store_models_matrices(path, action='store', standardization=True):
     if action == 'store':
         models_matrices = {}
 
@@ -1623,8 +1661,13 @@ def store_models_matrices(path, action='store'):
                 # Create a Gurobi model from the .mps file
                 model = gp.read(model_path)
 
+                if standardization:
+                    final_model, _ = canonical_form(model, minOption=True)
+                else:
+                    final_model = model.copy()
+
                 # Extract matrices
-                A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model)
+                A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(final_model)
 
                 # Convert matrices and vectors to serializable formats
                 # Assuming get_model_matrices already returns in a serializable format or implement conversion here
