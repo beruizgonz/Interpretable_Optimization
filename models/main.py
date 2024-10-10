@@ -9,9 +9,9 @@ from tabulate import tabulate
 from datetime import datetime
 import traceback
 
-from Interpretable_Optimization.models.utils_models.presolve_class import PresolveComillas
-from Interpretable_Optimization.models.utils_models.sensitivity_analysis import SensitivityAnalysis
-from Interpretable_Optimization.models.utils_models.utils_functions import create_original_model, get_model_matrices, \
+from models.utils_models.presolve_class import PresolveComillas
+from models.utils_models.sensitivity_analysis import SensitivityAnalysis
+from models.utils_models.utils_functions import create_original_model, get_model_matrices, \
     save_json, build_model_from_json, compare_models, normalize_features, matrix_sparsification, \
     sparsification_sensitivity_analysis, build_dual_model_from_json, \
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \

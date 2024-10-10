@@ -1,12 +1,12 @@
 from datetime import datetime
 import logging
-from Interpretable_Optimization.models.utils_models.presolve_class import PresolveComillas
+from utils_models.presolve_class import PresolveComillas
 from collections import defaultdict
 import gurobipy as gp
 import sys
 import os
-from Interpretable_Optimization.models.utils_models.presolve_class import PresolveComillas
-from Interpretable_Optimization.models.utils_models.utils_functions import nested_dict, get_model_matrices, \
+from utils_models.presolvepsilon_class import PresolvepsilonOperations
+from utils_models.utils_functions import nested_dict, get_model_matrices, \
     measuring_constraint_infeasibility, save_json, build_model_from_json
 import numpy as np
 import math
@@ -63,11 +63,15 @@ class SensitivityAnalysis:
         if self.perform_reduction_small_coefficients['val']:
             log.info(
                 f"{str(datetime.now())}: Sensitivity Analysis: Small Coefficients")
-            presolve_instance = PresolveComillas(model=self.model,
-                                                 perform_reduction_small_coefficients={"val": True,
-                                                                                       "threshold_small": None},
-                                                 perform_bound_strengthening=False
-                                                 )
+            # presolve_instance = PresolveComillas(model=self.model,
+            #                                      perform_reduction_small_coefficients={"val": True,
+            #                                                                            "epsilon": None},
+            #                                      perform_bound_strengthening=False
+            #                                      )
+            presolve_instance = PresolvepsilonOperations(model=self.model,
+                                                        eliminate_zero_rows_epsilon= {"val": True, "epsilon": 1e-10}, 
+                                                        sparsification=None)
+                                                        
             eps, of, dv, changed_indices, constraint_viol, of_dec, execution_time = self.sens_anals_small_coeffs(presolve_instance)
             sparsification_results = {
                 'epsilon': eps,
@@ -97,6 +101,7 @@ class SensitivityAnalysis:
         iteration = 1  # Initialize iteration counter
 
         A_initial = self.A.A.copy()
+        #print(A_initial.shape)
         original_model = self.model.copy()
 
         # Calculate total iterations for exponential growth
@@ -110,15 +115,15 @@ class SensitivityAnalysis:
         )
 
         threshold = self.perform_reduction_small_coefficients['init_threshold']
-
+        print(A_initial)
         while threshold <= self.perform_reduction_small_coefficients['max_threshold']:
             start_time = datetime.now()
-            presolve_instance.perform_reduction_small_coefficients['threshold_small'] = threshold
+            presolve_instance.eliminate_zero_rows_epsilon['epsilon'] = threshold
             (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
              changes_dictionary, operation_table) = (presolve_instance.orchestrator_presolve_operations())
-
+            
             A_changed = self.A.A.copy()
-
+            print(np.all(A_changed == A_initial))
             # Record indices where A has been changed
             indices = [(i, j) for i in range(self.A.shape[0]) for j in range(self.A.shape[1]) if
                        A_initial[i, j] != 0 and A_changed[i, j] == 0]

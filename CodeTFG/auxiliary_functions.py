@@ -101,3 +101,13 @@ def plot1(model_pr_epsilon, vector1, title, name1):
     plt.xlim(x_axis[0], x_axis[-1]) # Adjust x-axis limits
     # Show the graph
     plt.show()
+
+
+def convert_late_zeros_to_nan(vector):
+    found_non_zero = False
+    for i, num in enumerate(vector):
+        if num != 0:
+            found_non_zero = True
+        elif found_non_zero and num == 0:
+            vector[i] = float('nan')
+    return vector

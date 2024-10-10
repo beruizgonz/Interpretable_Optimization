@@ -119,6 +119,7 @@ def global_sensitivity_analysis(models, data):
 
             # Calculation of PROBLEM COMPLEXITY
             accumulated_model_ci = calculate_lengths(model_pr_ci)
+            convert_late_zeros_to_nan(accumulated_model_ci)
             total_elements_A = len(model_pr_dv) * len(model_du_dv)
             elements_A_made_0_pu = [x / total_elements_A for x in accumulated_model_ci] if total_elements_A else []
             problem_complexity = [1 - x for x in elements_A_made_0_pu]
@@ -146,6 +147,9 @@ def global_sensitivity_analysis(models, data):
         quartiles = [calculate_quartiles([data[i] for data in data_by_index]) for i in range(num_epsilons)]
         return mean, median, quartiles
 
+    mean_of, median_of, quartiles_of = calculate_statistics_by_index(objective_function_degradation_list)
+    mean_infeasibility, median_infeasibility, quartiles_infeasibility = calculate_statistics_by_index(infeasibility_list)
+    mediana_complexity, mediana_complexity, cuartiles_complexity = calculate_statistics_by_index(complexity_list)
     # Function to plot the data
     def plot_data(title, ylabel, data_dict, statistics_dict=None):
         plt.figure(figsize=(10, 6))
@@ -166,10 +170,10 @@ def global_sensitivity_analysis(models, data):
             quartile_25 = [q[0] for q in quartiles]
             quartile_75 = [q[1] for q in quartiles]
 
-        plt.plot(common_eps, mean[:len(common_eps)], '--', label='Mean', color='black')
-        plt.plot(common_eps, median[:len(common_eps)], ':', label='Median', color='blue')
-        plt.plot(common_eps, quartile_25[:len(common_eps)], '-.', label='Quartile 25', color='green')
-        plt.plot(common_eps, quartile_75[:len(common_eps)], '-.', label='Quartile 75', color='red')
+        plt.plot(eps_adjusted, mean[:len(eps_adjusted)], '--', label='Mean', color='black')
+        plt.plot(eps_adjusted, median[:len(eps_adjusted)], ':', label='Median', color='blue')
+        plt.plot(eps_adjusted, quartile_25[:len(eps_adjusted)], '-.', label='Quartile 25', color='green')
+        plt.plot(eps_adjusted, quartile_75[:len(eps_adjusted)], '-.', label='Quartile 75', color='red')
 
         plt.title(title, fontsize=20)
         plt.xlabel("Epsilon",  fontsize=14)
@@ -177,12 +181,12 @@ def global_sensitivity_analysis(models, data):
         plt.legend(fontsize=12)
         plt.show()
     
-    mean_of, median_of, quartiles_of = calculate_statistics_by_index(objective_function_degradation_list)
-    mean_infeasibility, median_infeasibility, quartiles_infeasibility = calculate_statistics_by_index(infeasibility_list)
-    mediana_complexity, mediana_complexity, cuartiles_complexity = calculate_statistics_by_index(complexity_list)
+
 # Assuming functions like remove_nan_sublists, set_values_below_threshold_to_zero, multiply_matrices, etc. are already defined.
 
 
     plot_data("Objective function degradation", "Objective function", all_objective_function_degradation, {'mean': mean_of, 'median': median_of, 'quartiles': quartiles_of})
     plot_data("Infeasibility evolution", "Infeasibility", all_infeasibility, {'mean': mean_infeasibility, 'median': median_infeasibility, 'quartiles': quartiles_infeasibility})
     plot_data("Complexity evolution", "Complexity", all_complexity, {'mean': mediana_complexity, 'median': mediana_complexity, 'quartiles': cuartiles_complexity})
+
+    return
