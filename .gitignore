@@ -162,3 +162,7 @@ cython_debug/
 *.json
 
 *.pkl
+
+figures/
+
+models/results_bounds.xlsx

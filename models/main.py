@@ -9,9 +9,9 @@ from tabulate import tabulate
 from datetime import datetime
 import traceback
 
-from models.utils_models.presolve_class import PresolveComillas
-from models.utils_models.sensitivity_analysis import SensitivityAnalysis
-from models.utils_models.utils_functions import create_original_model, get_model_matrices, \
+from utils_models.presolve_class import PresolveComillas
+from utils_models.sensitivity_analysis import SensitivityAnalysis
+from utils_models.utils_functions import create_original_model, get_model_matrices, \
     save_json, build_model_from_json, compare_models, normalize_features, matrix_sparsification, \
     sparsification_sensitivity_analysis, build_dual_model_from_json, \
     constraint_distance_reduction_sensitivity_analysis, pre_processing_model, constraint_reduction, \
@@ -84,8 +84,8 @@ if __name__ == "__main__":
               }
 
     # ================================================== Directories to work ===========================================
-    log.info(
-        f"{str(datetime.now())}: Preparing directories...")
+    # log.info(
+    #     f"{str(datetime.now())}: Preparing directories...")
 
     # Get the directory of the current script (main.py)
     current_script_dir = os.path.dirname(os.path.abspath(__file__))
@@ -126,8 +126,8 @@ if __name__ == "__main__":
         original_primal_bp.write(model_to_save)
 
     if config['load_model']['val']:
-        log.info(
-            f"{str(datetime.now())}: Loading models...")
+        # log.info(
+        #     f"{str(datetime.now())}: Loading models...")
 
         model_names = config['load_model']['name']
         model_path = os.path.join(data_path, config['load_model']['load_path'])
@@ -149,18 +149,19 @@ if __name__ == "__main__":
     total_models = len(model_files)
 
     for index, model_file in enumerate(model_files, start=1):
-
+        
         try:
+            print(model_file, '\n')
             model_to_load = os.path.join(model_path, model_file)
             model_name = model_file.replace('.mps', '')
             gp.setParam('OutputFlag', 0)
             original_primal_bp = gp.read(model_to_load)
 
-            log.info(f"{datetime.now()}: Processing Model {index} of {total_models} - {model_name}")
+            #log.info(f"{datetime.now()}: Processing Model {index} of {total_models} - {model_name}")
 
             # ========================================== Standardization of the model ==================================
-            log.info(
-                f"{str(datetime.now())}: Standardization of the model...")
+            # log.info(
+            #     f"{str(datetime.now())}: Standardization of the model...")
             if config["original_primal_canonical"]["val"]:
                 original_primal, track_elements = canonical_form(original_primal_bp,
                                                                  minOption=config["original_primal_canonical"][
@@ -170,37 +171,37 @@ if __name__ == "__main__":
 
             # ===================================== saving the original_primal model in the path =======================
             if config["save_original_model"]["val"]:
-                log.info(
-                    f"{str(datetime.now())}: Saving the original_primal...")
+                # log.info(
+                #     f"{str(datetime.now())}: Saving the original_primal...")
 
                 s_path = os.path.join(data_path, config["save_original_model"]["save_path"])
                 model_to_save = os.path.join(s_path, config["save_original_model"]["save_name"])
                 original_primal_bp.write(model_to_save)
 
             # ================================ Getting matrices and data of the original model =========================
-            log.info(
-                f"{str(datetime.now())}: Accessing matrix A, right-hand side b, cost function c, and the bounds of "
-                f"the original model...")
+            # log.info(
+            #     f"{str(datetime.now())}: Accessing matrix A, right-hand side b, cost function c, and the bounds of "
+            #     f"the original model...")
             A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
 
             # ==================================== Saving matrices as json in the path =================================
-            log.info(
-                f"{str(datetime.now())}: Saving A, b, c, lb and ub...")
+            # log.info(
+            #     f"{str(datetime.now())}: Saving A, b, c, lb and ub...")
             save_json(A, b, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
 
             # =========================== Creating the primal and the dual models from json files ======================
-            log.info(
-                f"{str(datetime.now())}: Creating primal model by loading A, b, c, lb and ub...")
+            # log.info(
+            #     f"{str(datetime.now())}: Creating primal model by loading A, b, c, lb and ub...")
             created_primal = build_model_from_json(current_matrices_path)
 
-            log.info(
-                f"{str(datetime.now())}: Creating dual model by loading A, b, c, lb and ub...")
+            # log.info(
+            #     f"{str(datetime.now())}: Creating dual model by loading A, b, c, lb and ub...")
             created_dual = build_dual_model_from_json(current_matrices_path)
             A_dual, b_dual, c_dual, co_dual, lb_dual, ub_dual, of_sense_dual, cons_senses_dual, variable_names = get_model_matrices(
                 created_dual)
 
-            log.info(
-                f"{str(datetime.now())}: Creating the normalized primal model...")
+            # log.info(
+            #     f"{str(datetime.now())}: Creating the normalized primal model...")
             A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
             A_norm, b_norm, A_scaler = normalize_features(A, b)
             save_json(A_norm, b_norm, c, lb, ub, of_sense, cons_senses, current_matrices_path, co, variable_names)
@@ -211,8 +212,8 @@ if __name__ == "__main__":
                 num_rows, num_cols = A.shape
                 if (num_rows > config['skip_big_models']['n_constraints']) or (
                         num_cols > config['skip_big_models']['n_variables']):
-                    log.info(
-                        f"{str(datetime.now())}: Skipping the model with {num_cols} variables and {num_rows} constraints...")
+                    # log.info(
+                    #     f"{str(datetime.now())}: Skipping the model with {num_cols} variables and {num_rows} constraints...")
                     continue
 
             # ==================================== Printing model in mathematical format ===============================
@@ -234,8 +235,8 @@ if __name__ == "__main__":
             # ======== solving all models: original_primal_bp, original_primal, created_primal and created_dual ========
 
             if config['solve_models']:
-                log.info(
-                    f"{str(datetime.now())}: Solving the original_primal model (before pre-processing)...")
+                # log.info(
+                #     f"{str(datetime.now())}: Solving the original_primal model (before pre-processing)...")
                 original_primal_bp.setParam('OutputFlag', config['verbose'])
                 try:
                     original_primal_bp.optimize()
@@ -244,8 +245,8 @@ if __name__ == "__main__":
                     print(f"Warning: Optimal solution was not found.")
                     original_primal_bp_sol = None
 
-                log.info(
-                    f"{str(datetime.now())}: Solving the original_primal model (after pre-processing)...")
+                # log.info(
+                #     f"{str(datetime.now())}: Solving the original_primal model (after pre-processing)...")
                 original_primal.setParam('OutputFlag', config['verbose'])
 
                 try:
@@ -255,8 +256,8 @@ if __name__ == "__main__":
                     print("Warning: Optimal solution was not found.")
                     original_primal_sol = None
 
-                log.info(
-                    f"{str(datetime.now())}: Solving the created_primal model...")
+                # log.info(
+                #     f"{str(datetime.now())}: Solving the created_primal model...")
                 created_primal.setParam('OutputFlag', config['verbose'])
 
                 try:
@@ -266,8 +267,8 @@ if __name__ == "__main__":
                     print(f"Warning: Optimal solution was not found.")
                     created_primal_sol = None
 
-                log.info(
-                    f"{str(datetime.now())}: Solving the normalized_primal model...")
+                # log.info(
+                #     f"{str(datetime.now())}: Solving the normalized_primal model...")
                 created_primal_norm.setParam('OutputFlag', config['verbose'])
 
                 try:
@@ -277,8 +278,8 @@ if __name__ == "__main__":
                     print(f"Warning: Optimal solution was not found.")
                     created_primal_norm_sol = None
 
-                log.info(
-                    f"{str(datetime.now())}: Solving the created_dual model...")
+                # log.info(
+                #     f"{str(datetime.now())}: Solving the created_dual model...")
                 created_dual.setParam('OutputFlag', config['verbose'])
 
                 try:
@@ -307,14 +308,14 @@ if __name__ == "__main__":
             if config['quality_check']:
                 quality_check(original_primal_bp, original_primal, created_primal, created_primal_norm, created_dual,
                               tolerance=1e-2)
-                log.info(
-                    f"{str(datetime.now())}: Quality check passed...")
+                # log.info(
+                #     f"{str(datetime.now())}: Quality check passed...")
 
             # ============================================= Presolve operations ========================================
             if config['presolve']['val']:
                 if config['presolve']['model_presolve'] == 'original_primal':
-                    log.info(
-                        f"{str(datetime.now())}: Presolve operations with the original_primal...")
+                    # log.info(
+                    #     f"{str(datetime.now())}: Presolve operations with the original_primal...")
                     model_to_use = original_primal
                 else:
                     log.info(
@@ -379,7 +380,7 @@ if __name__ == "__main__":
                     model_to_use_dual)
 
             # Saving the dictionary
-            dict2json(sparsification_results, 'sparsification_results.json')
+            dict2json(sparsification_results, 'sparsification_results1.json')
 
         except Exception as e:
             print(f"general error found:\n{traceback.format_exc()}\n{e}")

@@ -975,7 +975,7 @@ class PresolveComillas:
 
         # Initialize the new_upper_bound_matrix with +inf
         new_upper_bound_matrix = np.full_like(self.A.A, np.inf, dtype=np.float64)
-        new_lower_bound_matrix = np.full_like(self.A.A, -np.inf, dtype=np.float64)
+        new_lower_bound_matrix = np.full_like(self.A.A, 0, dtype=np.float64)
 
         # Iterate over each element in A to calculate the new upper bounds
         for i in range(num_rows):

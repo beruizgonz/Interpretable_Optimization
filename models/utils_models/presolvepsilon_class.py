@@ -69,12 +69,11 @@ class PresolvepsilonOperations:
         # Add initial counts to the operation table
         self.operation_table.append(("Initial", len(self.cons_senses), len(self.variable_names), self.A.nnz))
 
-    def orchestrator_presolve_operations(self, model, psilon = 1e-6):
+    def orchestrator_presolve_operations(self, model, epsilon = 1e-6):
 
         self.load_model_matrices(model)
-
         if self.opts.operate_epsilon_rows:
-            self.eliminate_zero_rows_operation(epsilon = self.opts.epsilon)
+            self.eliminate_zero_rows_operation(epsilon = epsilon)
 
         return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
                 self.change_dictionary, self.operation_table)    
@@ -136,38 +135,40 @@ class PresolvepsilonOperations:
             #     # cond = coeff_value / negative_bound < epsilon
             #     # Handle 'cond' accordingly
 
-    def eliminate_zero_rows_operation(self, epsilon=0.0015):
+    def eliminate_zero_rows_operation(self, epsilon):
         original_A = self.A.copy()
         A_norm, _, _ = normalize_features(self.A, self.b)
-
         num_rows, num_cols = A_norm.shape
         rows_to_delete = []
+
+        # Identify rows to be marked based on the norm criteria
         for i in range(num_rows):
             row = A_norm.getrow(i)
-            #Get the euclidean norm of the row
             row_norm = np.linalg.norm(row.toarray())
             abs_coeff = np.abs(row.data)
-            if row_norm / abs(self.b[i]) < epsilon:
-                # Remove the row
+            
+            # if row_norm / abs(self.b[i]) < epsilon:
+            #     rows_to_delete.append(i)
+            if np.all(abs_coeff / abs(self.b[i]) < epsilon):
                 rows_to_delete.append(i)
-            # Get the absolute values of the coefficients
-        
-            # # Check that for all coefficients, the absolute value is less than epsilon
-            elif np.all(abs_coeff / abs(self.b[i]) < epsilon):
-                rows_to_delete.append(i)
-                # Remove the row
-                # A_norm = np.delete(A_norm, i, axis=0)
-                # self.b = np.delete(self.b, i)
-                # self.cons_senses.pop(i)
-                # self.change_dictionary["Eliminate Zero Rows"]["Rows"].append(i)
-                # print("Row {} has been eliminated".format(i))
-        for i in range(len(rows_to_delete)):
-            if self.b[i] <= 0: 
-                continue
-            else: 
-                warnings.warn("Model is infeasible due to a non-redundant zero row.")
-        
-        #Remove the rows from the matrix
-        # self.A = csr_matrix(np.delete(original_A.toarray(), rows_to_delete, axis=0))
-        # self.b = np.delete(self.b, rows_to_delete)
+
+        #print(rows_to_delete)
+        rows_to_keep = []
+        for i in rows_to_delete:
+            if self.b[i] <= 0:
+                delete = True
+            else:
+                rows_to_keep.append(i)
+                # warnings.warn(f"Model is infeasible due to a non-redundant zero row at index {i}.")
+
+        # Update rows_to_delete based on rows_to_keep
+        rows_to_delete = [i for i in rows_to_delete if i not in rows_to_keep]
+
+        #print(rows_to_delete)
+        # Convert the matrix to a format that supports assignment, like COO or LIL
+        A_modifiable = self.A.tolil()
+        for i in rows_to_delete:
+            A_modifiable[i, :] = 0  # Set the entire row to zero
+        # Convert back to CSR format
+        self.A = A_modifiable.tocsr()
         self.change_dictionary["Eliminate Zero Rows"]["Rows"] = rows_to_delete
