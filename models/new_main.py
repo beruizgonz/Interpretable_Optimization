@@ -15,6 +15,7 @@ from opts import parse_opts
 from utils_models.presolvepsilon_class import PresolvepsilonOperations
 from utils_models.sensitivity_analysis import SensitivityAnalysis
 from utils_models.utils_functions import *
+from utils_models.standard_model import standard_form1, construct_dual_model
 
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -30,7 +31,7 @@ project_root = os.path.dirname(os.getcwd())
 model_path = os.path.join(project_root, 'data/GAMS_library', 'ROBERT_modified.mps')
 GAMS_path = os.path.join(project_root, 'data/GAMS_library')
 GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
-model_path_modified = os.path.join(GAMS_path_modified, 'INDUS89.mps')
+model_path_modified = os.path.join(GAMS_path_modified, 'PORT.mps')
 
 def load_class(model):
     presolve = PresolvepsilonOperations(model, eliminate_zero_rows_epsilon = True, opts = opts)
@@ -81,7 +82,7 @@ def build_normalized_model(A_norm, b_norm, c, lb, ub, of_sense, cons_senses, var
 
 
 
-def sensitivity_analysis(model, presolve, min_threshold = 0.0015, max_threshold = 0.25, step = 0.3):
+def sensitivity_analysis(model, presolve,  dual = False, min_threshold = 0.0015, max_threshold = 0.3, step = 0.4):
 
     original_model = model.copy()
     model.setParam('OutputFlag', 0)
@@ -97,9 +98,9 @@ def sensitivity_analysis(model, presolve, min_threshold = 0.0015, max_threshold 
     iteration = 1  # Initialize iteration counter
     original_model = model.copy()
 
-        # A_initial = A.A.copy()
-        # #print(A_initial.shape)
-        # original_model = model.copy()
+    # A_initial = A.A.copy()
+    # #print(A_initial.shape)
+    # original_model = model.copy()
 
         # Calculate total iterations for exponential growth
     total_iterations = math.ceil(
@@ -113,7 +114,7 @@ def sensitivity_analysis(model, presolve, min_threshold = 0.0015, max_threshold 
     )
 
     (A, b, c, lb, ub, of_sense, cons_senses, co, variable_names)   = get_model_matrices(model = original_model)
-    # model = build_normalized_model(A, b, c, lb, ub, of_sense, cons_senses, variable_names)
+    #model = build_normalized_model(A, b, c, lb, ub, of_sense, cons_senses, variable_names)
     # model.optimize()
     # if model.Status == GRB.OPTIMAL:
     #     print('Optimal objective value (normalized model):', model.ObjVal)
@@ -137,10 +138,13 @@ def sensitivity_analysis(model, presolve, min_threshold = 0.0015, max_threshold 
                        A_initial[i, j] != 0 and A_changed[i, j] == 0]
         # Delete the row with all zeros
         if len(indices) > 0:
-            print('Cambia')
+            print('changed')
         save_json(A_changed, b, c, lb, ub, of_sense, cons_senses, opts.save_path, co, variable_names)
-        iterative_model = build_model_from_json(opts.save_path)
-
+        #iterative_model = build_model_from_json(opts.save_path)
+        if not dual:
+             iterative_model = construct_model_from_json(opts.save_path)
+        else:
+            iterative_model = construct_dual_model_from_json(opts.save_path)
         # Solve the new model
         iterative_model.setParam('OutputFlag', 0)
         iterative_model.optimize()
@@ -168,7 +172,7 @@ def sensitivity_analysis(model, presolve, min_threshold = 0.0015, max_threshold 
             eps.append(threshold)
             of.append(np.nan)  # Append NaN for objective function
             of_dec.append(np.nan)
-            changed_indices.append(np.nan)
+            changed_indices.append(indices) # COMPROBATE THAT THIS MAKE SENSE
             constraint_viol.append(np.nan)
             dv.append(np.full(len(original_model.getVars()), np.nan))
 
@@ -228,11 +232,14 @@ def sensitivity_analysis_file(file):
     #     model_path = os.path.join(folder, model_name)
     model = gp.read(file)
     #model = gp.read(model_path)
-    original_primal, track_elements = canonical_form(model,minOption=True)
-    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
-    save_json(A, b, c, lb, ub, of_sense, cons_senses, opts.save_path, co, variable_names)
+    #original_primal, track_elements = canonical_form(model,minOption=True)
+    original_primal = standard_form1(model)
+    lb, ub = calculate_bounds2(original_primal)
+    
+    # A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
+    # save_json(A, b, c, lb, ub, of_sense, cons_senses, opts.save_path, co, variable_names)
     # Load the dual model
-    model_to_use_dual = build_dual_model_from_json(opts.save_path)
+    model_to_use_dual = construct_dual_model(original_primal)
 
     presolve = load_class(original_primal)
     start_time = time.time()
@@ -249,13 +256,17 @@ def sensitivity_analysis_file(file):
 
     start_time = time.time()
     presolve_dual = load_class(model_to_use_dual)
-    results_problem_dual = sensitivity_analysis(model_to_use_dual, presolve_dual)
+    results_problem_dual = sensitivity_analysis(model_to_use_dual, presolve_dual, dual = True)
     results[model_name]['dual'] = results_problem_dual
     results[model_name]['dual']['time_required'] = time.time() - start_time
     results[model_name]['dual']['mathematical_model'] = get_model_in_mathematical_format(
         model_to_use_dual)
+    
+    name = file.split('/')[-1]
+    name = name.split('.')[0]
 
-    dict2json(results, 'epsilon_results.json')
+    dict2json(results, f'epsilon_sparsification_{name}.json')
+    return results
 
 def sensitivity_analysis_folder(folder):
     results = nested_dict()
@@ -264,11 +275,12 @@ def sensitivity_analysis_folder(folder):
             continue
         model_path = os.path.join(folder, model_name)
         model = gp.read(model_path)
-        original_primal, track_elements = canonical_form(model,minOption=True)
-        A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
-        save_json(A, b, c, lb, ub, of_sense, cons_senses, opts.save_path, co, variable_names)
-        # Load the dual model
-        model_to_use_dual = build_dual_model_from_json(opts.save_path)
+        #original_primal, track_elements = canonical_form(model,minOption=True)
+        original_primal = standard_form1(model)
+        # A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
+        # save_json(A, b, c, lb, ub, of_sense, cons_senses, opts.save_path, co, variable_names)
+        # # Load the dual model
+        model_to_use_dual = construct_dual_model(original_primal)
 
         presolve = load_class(original_primal)
         start_time = time.time()
@@ -310,7 +322,8 @@ def main_bounds(folder):
             # Load the model
             model = gp.read(model_path)  # Assuming the model is in a valid format (like MPS or LP)
             standard_model = standard_form1(model)
-
+            A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(standard_model)
+            save_json(A, b, c, lb, ub, of_sense, cons_senses,'model_matrices.json', co, variable_names)
             # Uncomment these if you want to calculate bounds later
             standard_model.setParam('OutputFlag', 0)
             standard_model.optimize()
@@ -318,8 +331,11 @@ def main_bounds(folder):
             # bounds_model = build_model_from_json('model_matrices.json')
             # bounds_model.setParam('OutputFlag', 0)
             # bounds_model.optimize()
-            # if bounds_model.Status == gp.GRB.OPTIMAL:
-            #     objective_bounds = bounds_model.objVal
+
+            dual_model = construct_dual_model(standard_model)
+            dual_model.optimize()
+            if dual_model.Status == gp.GRB.OPTIMAL:
+                objective_bounds = dual_model.objVal
 
             # Check if the optimization status is optimal
             if standard_model.Status == gp.GRB.OPTIMAL:
@@ -367,50 +383,67 @@ if __name__ == '__main__':
     """
     ------------------------CALCULATE THE BOUNDS OF THE MODEL------------------------
     """
-    model_name = model_path_modified
-    model = gp.read(model_name)
-    model.optimize()
-    print(model.objVal)
-    # Get the model in standard form
-    #A, b, obj = parse_mps(model_name)
-    standard_model = standard_form1(model)
+    # model_name = model_path_modified
+    # model = gp.read(model_name)
+    # model.setParam('OutputFlag', 0)
+    # model.optimize()
+    # print(model.objVal)
+    # #print_model_in_mathematical_format(model)
+    # # Get the model in standard form
+    # #A, b, obj = parse_mps(model_name)
+    # standard_model = standard_form1(model)
     # canonical_model, _ = canonical_form(model)
-    # canonical_model.setParam('OutputFlag', 0)
-    standard_model.optimize()
+    # # canonical_model.setParam('OutputFlag', 0)
     # #print_model_in_mathematical_format(standard_model)
-
-    print(standard_model.objVal)
-    # # for var in standard_model.getVars():
+    # # standard_model.setParam('OutputFlag', 0)
+    # standard_model.optimize()
+    # print(standard_model.objVal)
+    # dual_model = construct_dual_model(standard_model)
+    # dual_model1 = construct_dual_model1(standard_model)
+    # print_model_in_mathematical_format(dual_model1)
+    # dual_model1.optimize()
+    # print(dual_model1.objVal)
+    # dual_model.optimize()
+    # print(dual_model.objVal)
+    #print_model_in_mathematical_format(dual_model)
+    # for var in standard_model.getVars():
     #     print(f'{var.VarName}: {var.X}')
     # #print_model_in_mathematical_format(standard_model)
     # lb, ub = calculate_bounds2(standard_model)
     # print(f'Lower bounds: {lb}')
     # print(f'Upper bounds: {ub}')
-    # # # See if lb <= ub
-    # # print(all(lb_new <= ub_new))
+    # # # # # # See if lb <= ub
+    # # # # # print(all(lb_new <= ub_new))
     # path = os.path.join(os.getcwd(), 'model_matrices.json')
-    # model = build_model_from_json(path)
-    # print_model_in_mathematical_format(model)
-    # model.setParam('OutputFlag', 0)
-    # model.optimize()
-    # print(model.objVal)
+    # model1 = build_model_from_json(path)
+    # # # print_model_in_mathematical_format(model)
+    # model1.setParam('OutputFlag', 0)
+    # model1.optimize()
+    # print(model1.objVal)
     # for var in model.getVars():
     #     print(f'{var.VarName}: {var.X}')
-    # # Compute the sensitivity analysis
+    # Compute the sensitivity analysis
 
-    #main_bounds(GAMS_path_modified)
+    main_bounds(GAMS_path_modified)
 
     """
     ----------------SENSITIVITY ANALYSIS FOR A SINGLE MODEL----------------
     """
-
-    # sensitivity_analysis_file(model_path)
+    # model_names =['AIRSP', 'PRODMIX', 'SPARTA', 'AIRCRAFT', 'SRKANDW', 'UIMP', 'PORT', 'GUSSEX1','GUSSGRID','SENSTRAN','TRNSPORT']
+    # all_results = nested_dict()
+    # for name in model_names:
+    #     model_path = os.path.join(GAMS_path, f'{name}.mps')
+    #     results = sensitivity_analysis_file(model_path)
+    #     all_results.update(results)
+    # dict2json(all_results, 'epsilon_sparsification.json')
+ 
     # model_name = os.path.join(GAMS_path, 'SHALE.mps')
     # model = gp.read(model_name)
-    # original_primal, track_elements = canonical_form(model)
-    # presolve = load_class(original_primal)
+    #original_primal, track_elements = canonical_form(model)
+    # standar_model = standard_form1(model)
+    # presolve = load_class(standar_model)
     # results_problem =  sensitivity_analysis(original_primal, presolve)
     # dict2json(results_problem, 'epsilon_results.json')
     # print(results_problem)
-    # sensitivity_analysis_folder(GAMS_path)
+    #sensitivity_analysis_folder(GAMS_path_modified)
 

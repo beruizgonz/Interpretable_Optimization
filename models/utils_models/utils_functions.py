@@ -16,7 +16,7 @@ from collections import defaultdict
 import pickle
 import pyomo.environ as pyo
 from datetime import timedelta
-
+import scipy
 
 def nested_dict():
     """
@@ -628,6 +628,125 @@ def build_dual_model_from_json(data_path):
     final_dual = pre_processing_model(model)
 
     return final_dual
+
+def construct_model_from_json(data_path):
+    A, b, c, lb, ub, of_sense, cons_senses, co, variable_names = None, None, None, None, None, None, None, None, None
+
+    # Load data from JSON files
+    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json', 'co.json',
+                  'variable_names.json']
+    for file_name in file_names:
+        file_path = os.path.join(data_path, file_name)
+
+        try:
+            with open(file_path, 'r') as file:
+                data = json.load(file)
+
+                if file_name == 'A.json':
+                    A = np.array(data)
+                elif file_name == 'b.json':
+                    b = np.array(data)
+                elif file_name == 'c.json':
+                    c = np.array(data)
+                elif file_name == 'lb.json':
+                    lb = np.array(data)
+                elif file_name == 'ub.json':
+                    ub = np.array(data)
+                elif file_name == 'of_sense.json':
+                    of_sense = data
+                elif file_name == 'cons_senses.json':
+                    cons_senses = data
+                elif file_name == 'co.json':
+                    co = data
+                elif file_name == 'variable_names.json':
+                    variable_names = data
+        except FileNotFoundError:
+            # Skip if the file does not exist
+            continue
+
+    # Create a Gurobi model and add variables
+    num_variables = len(c)
+    model = gp.Model()
+    model.addMVar(num_variables, lb=lb, ub=ub, name=variable_names)
+    model.update()
+
+    b = np.array(b)
+    c = np.array(c)
+
+    # Set the objective function
+    model.setObjective(c @ model.getVars(), of_sense)
+
+    # Add constraints they are all equality constraints
+    for i in range(A.shape[0]):
+        model.addConstr(A[i] @ model.getVars() == b[i], name=f'constraint_{i}')
+    model.update()
+    return model
+
+def construct_dual_model_from_json(data_path):
+    A, b, c, lb, ub, of_sense, cons_senses, co, variable_names = None, None, None, None, None, None, None, None, None
+    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json', 'co.json',
+                    'variable_names.json']
+    for file_name in file_names:
+        file_path   = os.path.join(data_path, file_name)
+
+        try:
+            with open(file_path, 'r') as file:
+                data = json.load(file)
+
+                if file_name == 'A.json':
+                    A = np.array(data)
+                elif file_name == 'b.json':
+                    b = np.array(data)
+                elif file_name == 'c.json':
+                    c = np.array(data)
+                elif file_name == 'lb.json':
+                    lb = np.array(data)
+                elif file_name == 'ub.json':
+                    ub = np.array(data)
+                elif file_name == 'of_sense.json':
+                    of_sense = data
+                elif file_name == 'cons_senses.json':
+                    cons_senses = data
+                elif file_name == 'co.json':
+                    co = data
+                elif file_name == 'variable_names.json':
+                    variable_names = data
+        except FileNotFoundError:
+            # Skip if the file does not exist
+            continue
+
+    # Create a Gurobi model and add variables
+    num_variables = len(c)
+    model = gp.Model()
+    model.addMVar(num_variables, lb=lb, ub=ub, name=variable_names)
+    model.update()
+
+    b = np.array(b)
+    c = np.array(c)
+
+    # Since all primal constraints are equality constraints, dual variables are unrestricted
+    # Create dual variables as an MVar with unrestricted bounds
+    dual_vars = model.addMVar(shape=num_variables, lb=-GRB.INFINITY, name='y')
+    
+    num_variables = len(c)
+    model = gp.Model()
+    model.addMVar(num_variables, lb=lb, ub=ub, name=variable_names)
+    model.update()
+
+    b = np.array(b)
+    c = np.array(c)
+
+    # Set the objective function
+    model.setObjective(c @ model.getVars(), GRB.MAXIMIZE)
+
+    # Add constraints they are all equality constraints
+    for i in range(A.shape[0]):
+        model.addConstr(A[i] @ model.getVars() <= b[i], name=f'constraint_{i}')
+    model.update()
+    return model
+
+
+
 
 def constraint_reduction(model, threshold, path):
     """
@@ -1483,261 +1602,6 @@ def canonical_form(model, minOption=False):
 
     return canonical_model, track_elements
 
-import gurobipy as gp
-
-import gurobipy as gp
-
-def standard_form(model):
-    """
-    Converts a given Gurobi model into its standard form.
-
-    In the standard form:
-    - All variables are non-negative.
-    - All constraints are equalities.
-    - The objective is to be minimized.
-
-    Args:
-    - model: The Gurobi model to be converted.
-
-    Returns:
-    - standard_model: The converted model in standard form.
-    - track_elements: A dictionary tracking the changes made to variables and constraints.
-    """
-
-    # Initialize tracking dictionaries for variables and constraints
-    track_elements = {'variables': {}, 'constraints': {}}
-
-    # Clone the model to avoid changing the original
-    standard_model = model.copy()
-
-    # Set the model sense to minimization
-    if standard_model.ModelSense != 1:
-        # Multiply the objective function by -1 to switch from maximization to minimization
-        standard_model.setObjective(-1 * standard_model.getObjective(), gp.GRB.MINIMIZE)
-        standard_model.ModelSense = 1  # Set the model sense to minimization
-
-    standard_model.update()
-
-    # Create a mapping from old variables to their replacements
-    var_replacements = {}
-
-    # Ensure all variables are non-negative
-    for var in standard_model.getVars():
-        lower_bound = var.LB
-        upper_bound = var.UB
-
-        if lower_bound == 0 and upper_bound == gp.GRB.INFINITY:
-            # Variable is already non-negative
-            track_elements['variables'][var.VarName] = 'original_non_negative'
-            continue
-
-        # Replace variable with non-negative variables
-        if lower_bound == -gp.GRB.INFINITY and upper_bound == gp.GRB.INFINITY:
-            # Variable is unrestricted in sign
-            pos_var = standard_model.addVar(lb=0, name=f"{var.VarName}_pos")
-            neg_var = standard_model.addVar(lb=0, name=f"{var.VarName}_neg")
-            var_replacements[var] = (pos_var, neg_var)
-
-            # Replace var in constraints and objective
-            track_elements['variables'][var.VarName] = 'replaced_with_pos_neg'
-        else:
-            # Variable has finite bounds
-            shift = lower_bound if lower_bound != -gp.GRB.INFINITY else 0
-            scale = 1
-            if upper_bound != gp.GRB.INFINITY and lower_bound != -gp.GRB.INFINITY:
-                scale = upper_bound - lower_bound
-
-            new_var = standard_model.addVar(lb=0, name=f"{var.VarName}_nonneg")
-            var_replacements[var] = (new_var, shift, scale)
-            track_elements['variables'][var.VarName] = 'replaced_with_non_negative'
-
-    standard_model.update()
-
-    # Replace variables in constraints and objective
-    for constr in standard_model.getConstrs():
-        expr = standard_model.getRow(constr)
-        new_expr = gp.LinExpr()
-        for i in range(expr.size()):
-            coeff = expr.getCoeff(i)
-            var = expr.getVar(i)
-            if var in var_replacements:
-                replacement = var_replacements[var]
-                if isinstance(replacement, tuple) and len(replacement) == 2:
-                    # Unrestricted variable replaced with two non-negative variables
-                    pos_var, neg_var = replacement
-                    new_expr.addTerms(coeff, pos_var)
-                    new_expr.addTerms(-coeff, neg_var)
-                else:
-                    # Variable with finite bounds replaced
-                    new_var, shift, scale = replacement
-                    new_expr.addTerms(coeff * scale, new_var)
-                    constr.RHS -= coeff * shift
-            else:
-                new_expr.addTerms(coeff, var)
-        standard_model.remove(constr)
-        standard_model.addConstr(new_expr, constr.Sense, constr.RHS, name=constr.ConstrName)
-
-    # Replace variables in the objective function
-    obj = standard_model.getObjective()
-    new_obj = gp.LinExpr()
-    for i in range(obj.size()):
-        coeff = obj.getCoeff(i)
-        var = obj.getVar(i)
-        if var in var_replacements:
-            replacement = var_replacements[var]
-            if isinstance(replacement, tuple) and len(replacement) == 2:
-                # Unrestricted variable replaced with two non-negative variables
-                pos_var, neg_var = replacement
-                new_obj.addTerms(coeff, pos_var)
-                new_obj.addTerms(-coeff, neg_var)
-            else:
-                # Variable with finite bounds replaced
-                new_var, shift, scale = replacement
-                new_obj.addTerms(coeff * scale, new_var)
-                obj.addConstant(coeff * shift)
-        else:
-            new_obj.addTerms(coeff, var)
-    standard_model.setObjective(new_obj, gp.GRB.MINIMIZE)
-
-    # Now, handle inequality constraints as in your original code
-    # (Convert them to equalities by adding slack or surplus variables)
-
-    # [Include your existing code for converting inequalities to equalities here]
-
-    standard_model.update()
-
-    return standard_model, track_elements
-
-
-def standard_form1(model):
-    # Step 1: Ensure the model is in minimization form
-    if model.ModelSense != 1:
-        model.setObjective(-1 * model.getObjective(), GRB.MINIMIZE)
-        model.ModelSense = 1  # Set the model sense to minimization
-
-    # Step 2: Ensure all variables are non-negative
-    for var in model.getVars():
-        if var.LB < 0 or (var.VType == GRB.CONTINUOUS and var.LB == -GRB.INFINITY):
-            # Introduce two non-negative variables (positive and negative part)
-            pos_var = model.addVar(lb=0, name=f"{var.VarName}_pos")
-            neg_var = model.addVar(lb=0, name=f"{var.VarName}_neg")
-            model.update()
-
-            # Add constraints to enforce original bounds
-            if var.UB < GRB.INFINITY:
-                model.addConstr(pos_var - neg_var <= var.UB, name=f"{var.VarName}_UB")
-            if var.LB > -GRB.INFINITY:
-                model.addConstr(pos_var - neg_var >= var.LB, name=f"{var.VarName}_LB")
-
-            # Replace 'var' in constraints
-            for constr in model.getConstrs():
-                coeff = model.getCoeff(constr, var)
-                if coeff != 0:
-                    model.chgCoeff(constr, pos_var, coeff)
-                    model.chgCoeff(constr, neg_var, -coeff)
-                    model.chgCoeff(constr, var, 0)
-
-            # Replace 'var' in objective
-            obj_coeff = var.Obj
-            if obj_coeff != 0:  # Ensure it's part of the objective function
-                model.setObjective(model.getObjective() + obj_coeff * (pos_var - neg_var), GRB.MINIMIZE)
-
-            # Remove the original variable from the model
-            model.remove(var)
-    model.update()
-
-    # Step 3: Transform all constraints into equalities by introducing slack/surplus variables
-    for constr in model.getConstrs():
-        sense = constr.Sense
-        if sense != GRB.EQUAL:
-            # Add slack or surplus variable based on constraint type
-            slack_var = model.addVar(lb=0, name=f"slack_{constr.ConstrName}")
-            model.update()
-
-            # Add slack or surplus depending on the sense of the constraint
-            if sense == GRB.LESS_EQUAL:
-                model.chgCoeff(constr, slack_var, 1)
-            elif sense == GRB.GREATER_EQUAL:
-                model.chgCoeff(constr, slack_var, -1)
-
-            # Set the constraint to equality after adding slack/surplus
-            constr.Sense = GRB.EQUAL
-
-        # Exclude the objective function variable from being part of the constraints
-        if constr.ConstrName == 'obj':
-            continue  # Skip any handling for the objective constraint
-
-    model.update()
-    # Modify the objective coefficients or redefine the objective
-    for v in model.getVars():
-        v.obj = 1.0  # Set a new objective coefficient for each variable
-    model.setObjective(gp.quicksum(v for v in model.getVars()), GRB.MINIMIZE)  # Redefine the objective function
-    
-    return model
-
-
-def standard_form1(model):
-    # Step 1: Ensure the model is in minimization form
-    if model.ModelSense != 1:
-        model.setObjective(-1 * model.getObjective(), GRB.MINIMIZE)
-        model.ModelSense = 1  # Set the model sense to minimization
-
-    # Step 2: Ensure all variables are non-negative
-    for var in model.getVars():
-        if var.LB < 0 or (var.VType == GRB.CONTINUOUS and var.LB == -GRB.INFINITY):
-            # Introduce two non-negative variables (positive and negative part)
-            pos_var = model.addVar(lb=0, name=f"{var.VarName}_pos")
-            neg_var = model.addVar(lb=0, name=f"{var.VarName}_neg")
-            model.update()
-
-            # Add constraints to enforce original bounds
-            if var.UB < GRB.INFINITY:
-                model.addConstr(pos_var - neg_var <= var.UB, name=f"{var.VarName}_UB")
-            if var.LB > -GRB.INFINITY:
-                model.addConstr(pos_var - neg_var >= var.LB, name=f"{var.VarName}_LB")
-
-            # Replace 'var' in constraints
-            for constr in model.getConstrs():
-                coeff = model.getCoeff(constr, var)
-                if coeff != 0:
-                    model.chgCoeff(constr, pos_var, coeff)
-                    model.chgCoeff(constr, neg_var, -coeff)
-                    model.chgCoeff(constr, var, 0)
-
-            # Replace 'var' in objective
-            obj_coeff = var.Obj
-            if obj_coeff != 0:  # Ensure it's part of the objective function
-                model.setObjective(model.getObjective() + obj_coeff * (pos_var - neg_var), GRB.MINIMIZE)
-
-            # Remove the original variable from the model
-            model.remove(var)
-    model.update()
-
-    # Step 3: Transform all constraints into equalities by introducing slack/surplus variables
-    for constr in model.getConstrs():
-        sense = constr.Sense
-        if sense != GRB.EQUAL:
-            # Add slack or surplus variable based on constraint type
-            slack_var = model.addVar(lb=0, name=f"slack_{constr.ConstrName}")
-            model.update()
-
-            # Add slack or surplus depending on the sense of the constraint
-            if sense == GRB.LESS_EQUAL:
-                model.chgCoeff(constr, slack_var, 1)
-            elif sense == GRB.GREATER_EQUAL:
-                model.chgCoeff(constr, slack_var, -1)
-
-            # Set the constraint to equality after adding slack/surplus
-            constr.Sense = GRB.EQUAL
-
-        # Exclude the objective function variable from being part of the constraints
-        if constr.ConstrName == 'obj':
-            continue  # Skip any handling for the objective constraint
-
-    model.update()
-
-    return model
-
 def print_model(model): 
     # Print Objective Function
     print("Objective Function:")
@@ -1845,85 +1709,6 @@ def linear_dependency(A, b, feasibility_tolerance=0.01):
 
     return dependent_rows, has_linear_dependency
 
-import scipy
-
-def calculate_bounds(model):
-    """
-    Repeatedly calculate the bounds of variables in a Gurobi model based on the constraints
-    until the lower and upper bounds converge (i.e., do not change between iterations).
-
-    Parameters:
-    - model: Gurobi model object, the optimization model from which to calculate the bounds.
-
-    Returns:
-    - lb_new: numpy array, the updated lower bounds of the variables.
-    - ub_new: numpy array, the updated upper bounds of the variables.
-    """
-    # Extract model matrices and data
-    A, b, c, co, lb, ub, of_sense, cons_sense, variable_names = get_model_matrices(model)
-    n_constraints, n_variables = A.shape
-
-    # Convert A to a dense array if it's a CSR matrix
-    if scipy.sparse.isspmatrix_csr(A):
-        A_dense = A.toarray()
-    else:
-        A_dense = A  # Assume it's already a dense array
-
-    # Initialize bounds
-    lb_new = lb.copy()
-    ub_new = ub.copy()
-
-    # Prepare b as a column vector
-    b_vector = np.array(b).reshape(-1, 1)  # Shape: (n_constraints, 1)
-    # Repeat the b_vector n_variables times to match the shape of A_dense
-    #b_vector = np.tile(b_vector, (1, n_variables))
-
-    converged = False
-    iteration = 0
-
-    while iteration < 1:
-        iteration += 1
-        print(f"Iteration {iteration}")
-        # Step 1: Compute new upper bounds (ub_new_next)
-        CL_matrix_ub = np.tile(lb_new, (n_variables, 1))
-        np.fill_diagonal(CL_matrix_ub, 0)
-        ub_numerator = b_vector - (A_dense @ CL_matrix_ub.T)
-        ub_denominator = A_dense
-        ub_matrix = np.where(ub_denominator > 0, ub_numerator / ub_denominator, np.nan)
-        # lb_matrix = np.where(ub_denominator < 0, ub_numerator / ub_denominator, np.nan)
-        ub_new_next = np.nanmin(ub_matrix, axis=0)
-        ub_new_next = np.where(np.isnan(ub_new_next), np.inf, ub_new_next)
-        ub_new_next[ub_new_next <= 0] = np.inf  # Optionally set negative upper bounds to zero
-
-        # # Step 2: Compute new lower bounds (lb_new_next)
-        CL_matrix_lb = np.tile(ub_new_next, (n_variables, 1))
-        np.fill_diagonal(CL_matrix_lb, 0)
-        lb_numerator = b_vector - (A_dense @ CL_matrix_lb.T)
-        lb_denominator = A_dense
-        # Calculate lb_new_next as the maximum over constraints (ignoring NaNs)
-        lb_matrix = np.where(lb_denominator > 0, lb_numerator / lb_denominator, 0)
-        lb_new_next = np.nanmax(lb_matrix, axis=0)
-        print(lb_new_next)
-
-        # if (np.allclose(lb_new, lb_new_next, rtol=1e-6, atol=1e-6) and
-        #     np.allclose(ub_new, ub_new_next, rtol=1e-6, atol=1e-6)):
-        #     print("Convergence reached.")
-        #     converged = True
-        # else:
-        #     #Update lb_new and ub_new for the next iteration
-        #     lb_new = lb_new_next
-        #     ub_new = ub_new_next
-        # The upper bounds must be greater than or equal to the lower bounds
-    #ub_new_next[ub_new_next <= 0] = np.inf  # Optionally set negative upper bounds to zero
-    # print(ub_new_next)
-        # Optionally save intermediate results to a JSON file (for tracking progress)
-    ub_new = ub_new_next
-    save_json(A, b, c, lb_new, ub_new, of_sense, cons_sense, "model_matrices.json", co, variable_names)
-
-    # Return the updated bounds once convergence is reached
-    return lb_new, ub_new
-
-
 def model_stats(model):
     """
     Calculates the number of variables and constraints in a Gurobi model.
@@ -1938,7 +1723,6 @@ def model_stats(model):
     n_var = model.numVars
     n_const = model.numConstrs
     return n_var, n_const
-
 
 def get_primal_decisions_to_excel(models):
     """
@@ -2085,85 +1869,6 @@ def gurobi_to_pyomo(gurobi_model):
 
     return pyomo_model
 
-def calculate_bounds1(model): 
-        """
-            Performs bound strengthening on decision variables of a linear programming (LP) problem.
-            This operation aims to tighten the lower and upper bounds of variables based on the
-            constraint matrix, right-hand side values, and existing bounds, potentially reducing the
-            feasible region and improving the efficiency of optimization algorithms.
-
-            The process involves analyzing each constraint to determine how the bounds of a variable
-            can be tightened without altering the feasible set of the LP problem. This is done by
-            calculating the minimum activity for each constraint (excluding the variable under
-            consideration) and using it to adjust the variable's bounds.
-        """
-        bound_strengthened = 0
-        A, b, c, co, lb, ub, of_sense, cons_sense, variable_names = get_model_matrices(model)
-        n_constraints, n_variables = A.shape
-
-        # Convert A to a dense array if it's a CSR matrix
-        if scipy.sparse.isspmatrix_csr(A):
-            A_dense = A.toarray()
-        else:
-            A_dense = A  # Assume it's already a dense array
-        num_rows, num_cols = A_dense.shape
-        min_activity_matrix = np.where(A_dense < 0, -A_dense* lb,
-                                        np.where(A_dense > 0, -A_dense *ub, 0))
-        max_activity_matrix = np.where(A_dense> 0, -A_dense * lb,
-                                       np.where(A_dense < 0, A_dense * ub, 0))
-
-        # Initialize an empty array for the complementary_min_activity
-        complementary_min_activity = np.zeros_like(min_activity_matrix)
-        complementary_max_activity = np.zeros_like(max_activity_matrix)
-
-        # Use broadcasting to perform the operation for each column
-        for j in range(num_cols):
-            # Create a copy of min_activity_matrix and set the jth column to 0
-            modified_matrix_min = np.copy(min_activity_matrix)
-            modified_matrix_max = np.copy(max_activity_matrix)
-
-            modified_matrix_min[:, j] = 0  # Exclude column j from the sum
-            modified_matrix_max[:, j] = 0  # Exclude column j from the sum
-
-            # Sum over rows to calculate the complementary min activity for each element not considering column j
-            complementary_min_activity[:, j] = modified_matrix_min.sum(axis=1)
-            complementary_max_activity[:, j] = modified_matrix_max.sum(axis=1)
-
-        # Initialize the new_upper_bound_matrix with +inf
-        new_upper_bound_matrix = np.full_like(A_dense, np.inf, dtype=np.float64)
-        new_lower_bound_matrix = np.full_like(A_dense, 0, dtype=np.float64)
-
-        # Iterate over each element in A to calculate the new upper bounds
-        for i in range(num_rows):
-            for j in range(num_cols):
-                a_ij = A_dense[i, j]
-                if a_ij < 0:
-                    # Calculate new upper bound based on complementary min activity
-                    new_upper_bound_matrix[i, j] = (-b[i] - complementary_min_activity[i, j]) / (-1*a_ij)
-                elif a_ij > 0:
-                    # Calculate new upper bound based on complementary min activity
-                    new_lower_bound_matrix[i, j] = (-1*b[i] - complementary_min_activity[i, j]) / (-1*a_ij)
-
-        # Initialize a vector to hold the final new upper bounds for each variable
-        final_new_upper_bounds = np.full(num_cols, -np.inf)
-        final_new_lower_bounds = np.full(num_cols, -np.inf)
-
-        for j in range(num_cols):
-            final_new_upper_bounds[j] = np.min(new_upper_bound_matrix[:, j])
-            final_new_lower_bounds[j] = np.max(new_lower_bound_matrix[:, j])
-
-        # Update the original upper bounds if the new calculated bounds are tighter
-        for j in range(num_cols):
-            if (final_new_upper_bounds[j] < ub[j]) and (final_new_upper_bounds[j] > lb[j]):
-                ub[j] = final_new_upper_bounds[j]
-                bound_strengthened += 1
-            if (final_new_lower_bounds[j] > lb[j]) and (final_new_lower_bounds[j] < ub[j]):
-                lb[j] = final_new_lower_bounds[j]
-                bound_strengthened += 1
-        
-        save_json(A, b, c,final_new_lower_bounds, final_new_upper_bounds, of_sense, cons_sense, "model_matrices.json", co, variable_names) 
-
-        return final_new_lower_bounds, final_new_upper_bounds
 
 def calculate_bounds2(model): 
 
@@ -2175,52 +1880,40 @@ def calculate_bounds2(model):
         A_dense = A.toarray()
     else:
         A_dense = A  # Assume it's already a dense array
-    
+    convergence = False
     b = np.array(b).reshape((-1, 1))
-    num_rows, num_cols = A_dense.shape
-    min_activity_matrix = np.where(A_dense < 0, -A_dense *ub, np.where(A_dense > 0,-A_dense * lb, 0))
+    iteration = 0
+    while not convergence:
+        iteration += 1
+        num_rows, num_cols = A_dense.shape
+        min_activity_matrix = np.where(A_dense < 0, -A_dense *ub, np.where(A_dense > 0,-A_dense * lb, 0))
+        min_activity = np.where(A_dense < 0, ub, lb)
+        ones = np.ones((num_cols, num_cols))  # Create a matrix of ones with the shape (num_cols, num_cols)
+        np.fill_diagonal(ones, 0)  # Set the diagonal elements to 0
+        ub_numerator = b + (min_activity_matrix @ ones)
+        same_sign = np.sign(A_dense) == np.sign(ub_numerator)
+        # Calculate the new upper bounds as the minimum over constraints viewing the sign of the denominator and numerator, if they are the same, then the value is the minimum of the two, if they are different, then the value is the maximum of the two
+        ub_matrix = np.where(same_sign, ub_numerator / A_dense, ub)
+        ub_new = np.nanmin(ub_matrix, axis=0)
+        # # Calculate the new lb
+        max_activity_matrix = np.where(A_dense > 0, -A_dense *ub_new, np.where(A_dense < 0, -A_dense * lb, 0))
+        lb_numerator = b + (max_activity_matrix @ ones)
+        #same_sign = np.sign(A_dense) == np.sign(lb_numerator)
+        same_sign_positive = (np.sign(A_dense) > 0) & (np.sign(lb_numerator) > 0)
+        same_sign_negative = (np.sign(A_dense) < 0) & (np.sign(lb_numerator) < 0) 
+        same_sign = same_sign_positive & same_sign_negative
+        lb_matrix = np.where(same_sign, lb_numerator / A_dense, lb)
+        lb_new = np.nanmax(lb_matrix, axis=0)
 
-    complementary_min_activity = np.zeros_like(min_activity_matrix)
+        #print('Iteration:', iteration, 'lb:', lb_new, 'ub:', ub_new)
 
-    #Use broadcasting to perform the operation for each column
-    for j in range(num_cols):
-        # Create a copy of min_activity_matrix and set the jth column to 0
-        modified_matrix_min = np.copy(min_activity_matrix)
+        if np.allclose(ub, ub_new, rtol=1e-6, atol=1e-6) and np.allclose(lb, lb_new, rtol=1e-6, atol=1e-6):
+            convergence = True
+            print("Convergence reached.")
+        else:
+            ub = ub_new
+            lb = lb_new
 
-        modified_matrix_min[:, j] = 0  # Exclude column j from the sum
-
-
-        # Sum over rows to calculate the complementary min activity for each element not considering column j
-        complementary_min_activity[:, j] = modified_matrix_min.sum(axis=1)
-
-    ub_numerator = b + complementary_min_activity
-    ub_denominator = A_dense
-    ub_matrix = np.where(ub_denominator > 0, ub_numerator / ub_denominator, np.nan)
-    # # Calculate the new upper bounds as the minimum over constraints (ignoring NaNs)
-    ub_new = np.nanmin(ub_matrix, axis=0)
-    ub_new[np.isnan(ub_new)] = np.inf
-    # Put type as float
-    ub_new = ub_new.astype(float)
-    print(ub_new.shape)
-    print(ub_new.shape)
-    save_json(A, b, c, lb, ub_new, of_sense, cons_sense, "model_matrices.json", co, variable_names)
-
-    # matrix_activity_matrix = np.where(A_dense < 0, -A_dense * lb, np.where(A_dense > 0, -A_dense * ub_new, 0))
-    # complementary_max_activity = np.zeros_like(matrix_activity_matrix)
-
-    # for j in range(num_cols):
-    #     # Create a copy of matrix_activity_matrix and set the jth column to 0
-    #     modified_matrix_max = np.copy(matrix_activity_matrix)
-    #     modified_matrix_max[:, j] = 0
-    #     complementary_max_activity[:, j] = modified_matrix_max.sum(axis=1)
-
-    # lb_numerator = b + complementary_max_activity
-    # lb_denominator = A_dense
-    # lb_matrix = np.where(lb_denominator > 0, lb_numerator / lb_denominator, np.nan)
-
-    # lb_new = np.nanmax(lb_matrix, axis=0)
-    # lb_new[(np.isnan(lb_new))] = 0
-    # print(lb_new)
-
-    return lb, ub_new
+    save_json(A, b, c, lb_new, ub_new, of_sense, cons_sense, "model_matrices.json", co, variable_names)
+    return lb_new, ub_new
    

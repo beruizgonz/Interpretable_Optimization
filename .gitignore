@@ -166,3 +166,9 @@ cython_debug/
 figures/
 
 models/results_bounds.xlsx
+
+data/GAMS_library_modified/
+
+CodeTFG/figures_sparsification/
+
+Phillipe/

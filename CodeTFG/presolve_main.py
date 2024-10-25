@@ -1,6 +1,7 @@
 import json
-from .auxiliary_functions import *
-from .statistics import *
+from auxiliary_functions import *
+from statistics import *
+import os 
 
 def analisis_de_sensibilidad(modelo, datos):
     if modelo in datos:
@@ -163,7 +164,7 @@ def global_sensitivity_analysis(models, data):
 
         if statistics_dict:
             num_epsilons = len(statistics_dict.get('mean', []))
-            common_eps = np.linspace(min(eps_adjusted), max(eps_adjusted), num=num_epsilons)
+            #common_eps = np.linspace(min(eps_adjusted), max(eps_adjusted), num=num_epsilons)
             mean = statistics_dict.get('mean', [])
             median = statistics_dict.get('median', [])
             quartiles = statistics_dict.get('quartiles', [])
@@ -175,18 +176,47 @@ def global_sensitivity_analysis(models, data):
         plt.plot(eps_adjusted, quartile_25[:len(eps_adjusted)], '-.', label='Quartile 25', color='green')
         plt.plot(eps_adjusted, quartile_75[:len(eps_adjusted)], '-.', label='Quartile 75', color='red')
 
+        figure_path = os.path.join(os.getcwd(), 'figures_sparsification')
+        if not os.path.exists(figure_path):
+            os.makedirs(figure_path)
         plt.title(title, fontsize=20)
         plt.xlabel("Epsilon",  fontsize=14)
         plt.ylabel(ylabel)
         plt.legend(fontsize=12)
+        plt.savefig(os.path.join(figure_path, f"{title}.png"))
         plt.show()
     
 
 # Assuming functions like remove_nan_sublists, set_values_below_threshold_to_zero, multiply_matrices, etc. are already defined.
 
 
-    plot_data("Objective function degradation", "Objective function", all_objective_function_degradation, {'mean': mean_of, 'median': median_of, 'quartiles': quartiles_of})
-    plot_data("Infeasibility evolution", "Infeasibility", all_infeasibility, {'mean': mean_infeasibility, 'median': median_infeasibility, 'quartiles': quartiles_infeasibility})
-    plot_data("Complexity evolution", "Complexity", all_complexity, {'mean': mediana_complexity, 'median': mediana_complexity, 'quartiles': cuartiles_complexity})
+    plot_data(f"Objective function degradation_{models}", f"Objective function_{models}", all_objective_function_degradation, {'mean': mean_of, 'median': median_of, 'quartiles': quartiles_of})
+    plot_data(f"Infeasibility evolution_{models}", f"Infeasibility_{models}", all_infeasibility, {'mean': mean_infeasibility, 'median': median_infeasibility, 'quartiles': quartiles_infeasibility})
+    plot_data(f"Complexity evolution_{models}", f"Complexity_{models}", all_complexity, {'mean': mediana_complexity, 'median': mediana_complexity, 'quartiles': cuartiles_complexity})
+    # Save the figures
+
 
     return
+
+
+if __name__ == '__main__': 
+    # Load the data from the JSON file
+    parent_dir = os.path.dirname(os.getcwd())
+
+    data_path = os.path.join(parent_dir, 'models/epsilon_sparsification.json')
+    print(os.path.exists(data_path))
+    with open(data_path, 'r') as file:
+        data = json.load(file)
+
+    modelos_tipo1 = ['AIRSP', 'PRODMIX', 'SPARTA' ]
+    #graphed:
+    modelos_tipo2 = ['AIRCRAFT','SRKANDW','UIMP']
+    #grahped:
+    modelos_tipo3 = ['GUSSEX1','GUSSGRID','SENSTRAN','TRNSPORT']
+    modelos_tipo4 = ['PORT']
+
+    # Perform the global sensitivity analysis
+    global_sensitivity_analysis(modelos_tipo4, data)
+    global_sensitivity_analysis(modelos_tipo3, data)
+    global_sensitivity_analysis(modelos_tipo2, data)
+    global_sensitivity_analysis(modelos_tipo1, data)
