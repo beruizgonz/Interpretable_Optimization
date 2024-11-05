@@ -132,7 +132,7 @@ def plot_subplots(folder, model_name, vector_epsilon, vector1, vector2, vector3,
 
         # Set a title for the entire plot
     fig.suptitle(f'Sparsification indexes for {model_name} problem', fontsize=16)
-    save_path = os.path.join(folder, f'sparsification_indexes_{model_name}.png')
+    save_path = os.path.join(folder, f'zero_epsilon_{model_name}.png')
     plt.savefig(save_path)
     #plt.show()
     plt.close()

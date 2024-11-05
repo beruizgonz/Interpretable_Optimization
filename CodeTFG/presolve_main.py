@@ -167,16 +167,13 @@ if __name__ == '__main__':
     # sensitivity_analysis('AIRSP', data)
     project_root = os.path.dirname(os.getcwd())
     figures_sparsification = os.path.join(project_root, 'figures/figures_sparsification')
-    zeroepsilon_rows = os.path.join(project_root, 'figures/zeroepsilon_rows')
-    # if folder does not exist, create it
-    if not os.path.exists(figures_sparsification):
-        os.makedirs(figures_sparsification)
+    zeroepsilon_rows = os.path.join(project_root, 'figures/zeroepsilon_rows_norm')
 
     results_foder = os.path.join(project_root, 'results')
     sparsification_folder = os.path.join(results_foder, 'epsilon_sparsification_new')
-    rowsepsilon_folder = os.path.join(results_foder, 'zeroepsilon_rows_new')
-    print(os.path.exists(sparsification_folder))
-    for root, dirs, files in os.walk(sparsification_folder):
+    rowsepsilon_folder = os.path.join(results_foder, 'zeroepsilon_rows_norm')
+
+    for root, dirs, files in os.walk(rowsepsilon_folder):
         for file in files:
             if file.endswith('.json'):
                 print(f"Processing file {file}")
@@ -186,5 +183,5 @@ if __name__ == '__main__':
                     with open(os.path.join(root, file), 'r') as f:
                         data = json.load(f)
                         for model in data.keys():
-                            sensitivity_analysis(figures_sparsification, model, data)
+                            sensitivity_analysis(zeroepsilon_rows, model, data)
                 

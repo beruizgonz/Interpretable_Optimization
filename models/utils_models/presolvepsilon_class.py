@@ -102,7 +102,7 @@ class PresolvepsilonOperations:
         A_norm = A_norm.toarray()
         # Convert
         A_modifiable = self.A.tolil()
-        max_sparsification = np.where(A_norm < 0, +A_norm* self.ub, np.where(A_norm > 0, A_norm * self.lb, 0))
+        max_sparsification = np.where(A_norm < 0, -A_norm* self.ub, np.where(A_norm > 0, A_norm * self.lb, 0))
         ones = np.ones((A_norm.shape[1], A_norm.shape[1]))
         np.fill_diagonal(ones, 0)
         max_activity_variable = max_sparsification @ ones

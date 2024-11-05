@@ -75,6 +75,7 @@ def complexity_index(model, data):
     modelo_pr_cv_medias = calculate_means(modelo_pr_cv)
 
     constraints = len(modelo_pr_cv[0])
+    print(constraints)
     variables = len(modelo_pr_dv[0])
     
 
@@ -102,16 +103,21 @@ def complexity_index(model, data):
             complexity_rows = 1
 
         else: 
+            if len(row) > 0:
+                print('Row:', len(row))
             complexity_rows = 1 - len(row) / constraints
+        rows.append(complexity_rows)
 
     for col in columns_pr_changed:
         if col is None:
             complexity_columns = 1
         else:
+            if len(col) > 0:
+                print('Column:', len(col))
             complexity_columns = 1 - len(col) / variables
      
        
-        rows.append(complexity_rows)
+        
         columns.append(complexity_columns)
         #print(total_elements_A)
             #print(total_elements_A)
