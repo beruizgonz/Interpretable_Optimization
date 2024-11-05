@@ -365,85 +365,83 @@ def standard_form(model):
     return standard_model, track_elements
 
 
-# def standard_form1(model):
-#     print("Converting the model to standard form...")
-#     # Step 1: Ensure the model is in minimization form
-#     if model.ModelSense != 1:
-#         model.setObjective(-1 * model.getObjective(), GRB.MINIMIZE)
-#         model.ModelSense = 1  # Set the model sense to minimization
+def standard_form1(model):
+    print("Converting the model to standard form...")
+    # Step 1: Ensure the model is in minimization form
+    if model.ModelSense != 1:
+        model.setObjective(-1 * model.getObjective(), GRB.MINIMIZE)
+        model.ModelSense = 1  # Set the model sense to minimization
 
-#     # Step 2: Ensure all variables are non-negative
-#     vars_to_remove = []
-#     for var in model.getVars():
-#         print(f"Processing variable {var.VarName}")
-#         if var.LB != 0 or var.UB != GRB.INFINITY:
-#             # Introduce two non-negative variables (positive and negative part)
-#             pos_var = model.addVar(lb=0, name=f"{var.VarName}_pos")
-#             neg_var = model.addVar(lb=0, name=f"{var.VarName}_neg")
+    # Step 2: Ensure all variables are non-negative
+    vars_to_remove = []
+    for var in model.getVars():
+        print(f"Processing variable {var.VarName}")
+        if var.LB != 0 or var.UB != GRB.INFINITY:
+            # Introduce two non-negative variables (positive and negative part)
+            pos_var = model.addVar(lb=0, name=f"{var.VarName}_pos")
+            neg_var = model.addVar(lb=0, name=f"{var.VarName}_neg")
             
-#             # Add constraints to enforce original bounds
-#             if var.UB < GRB.INFINITY:
-#                 print(f"Adding upper bound constraint for {var.VarName}")
-#                 model.addConstr(pos_var - neg_var <= var.UB, name=f"{var.VarName}_UB")
-#             if var.LB > -GRB.INFINITY:
-#                 print(f"Adding lower bound constraint for {var.VarName}")
-#                 model.addConstr(pos_var - neg_var >= var.LB, name=f"{var.VarName}_LB")
+            # Add constraints to enforce original bounds
+            if var.UB < GRB.INFINITY:
+                print(f"Adding upper bound constraint for {var.VarName}")
+                model.addConstr(pos_var - neg_var <= var.UB, name=f"{var.VarName}_UB")
+            if var.LB > -GRB.INFINITY:
+                print(f"Adding lower bound constraint for {var.VarName}")
+                model.addConstr(pos_var - neg_var >= var.LB, name=f"{var.VarName}_LB")
 
-#             # Replace 'var' in constraints
-#             for constr in model.getConstrs():
-#                 coeff = model.getCoeff(constr, var)
-#                 if coeff != 0:
-#                     model.chgCoeff(constr, pos_var, coeff)
-#                     model.chgCoeff(constr, neg_var, -coeff)
-#                     model.chgCoeff(constr, var, 0)
+            # Replace 'var' in constraints
+            for constr in model.getConstrs():
+                coeff = model.getCoeff(constr, var)
+                if coeff != 0:
+                    model.chgCoeff(constr, pos_var, coeff)
+                    model.chgCoeff(constr, neg_var, -coeff)
+                    model.chgCoeff(constr, var, 0)
 
-#             # Replace 'var' in the objective
-#             obj_coeff = var.Obj
-#             if obj_coeff != 0:  # Ensure it's part of the objective function
-#                 model.setObjective(model.getObjective() + obj_coeff * (pos_var - neg_var), GRB.MINIMIZE)
+            # Replace 'var' in the objective
+            obj_coeff = var.Obj
+            if obj_coeff != 0:  # Ensure it's part of the objective function
+                model.setObjective(model.getObjective() + obj_coeff * (pos_var - neg_var), GRB.MINIMIZE)
 
-#             # Mark the original variable for removal
-#             vars_to_remove.append(var)
+            # Mark the original variable for removal
+            vars_to_remove.append(var)
 
-#         # Remove the marked variables after all replacements are done
-#         model.update()
-#         for var in vars_to_remove:
-#             model.remove(var)
-#         model.update()
+        # Remove the marked variables after all replacements are done
+        model.update()
+        for var in vars_to_remove:
+            model.remove(var)
+        model.update()
 
-#     # Step 3: Transform all constraints into equalities by introducing slack/surplus variables
-#     for constr in model.getConstrs():
-#         sense = constr.Sense
-#         if sense != GRB.EQUAL:
-#             # Add slack or surplus variable based on constraint type
-#             slack_var = model.addVar(lb=0, name=f"slack_{constr.ConstrName}")
-#             model.update()
+    # Step 3: Transform all constraints into equalities by introducing slack/surplus variables
+    for constr in model.getConstrs():
+        sense = constr.Sense
+        if sense != GRB.EQUAL:
+            # Add slack or surplus variable based on constraint type
+            slack_var = model.addVar(lb=0, name=f"slack_{constr.ConstrName}")
+            model.update()
 
-#             # Add slack or surplus depending on the sense of the constraint
-#             if sense == GRB.LESS_EQUAL:
-#                 model.chgCoeff(constr, slack_var, 1)
-#             elif sense == GRB.GREATER_EQUAL:
-#                 model.chgCoeff(constr, slack_var, -1)
+            # Add slack or surplus depending on the sense of the constraint
+            if sense == GRB.LESS_EQUAL:
+                model.chgCoeff(constr, slack_var, 1)
+            elif sense == GRB.GREATER_EQUAL:
+                model.chgCoeff(constr, slack_var, -1)
 
-#             # Set the constraint to equality after adding slack/surplus
-#             constr.Sense = GRB.EQUAL
+            # Set the constraint to equality after adding slack/surplus
+            constr.Sense = GRB.EQUAL
 
-#         # Exclude the objective function variable from being part of the constraints
-#         if constr.ConstrName == 'obj':
-#             continue  # Skip any handling for the objective constraint
+        # Exclude the objective function variable from being part of the constraints
+        if constr.ConstrName == 'obj':
+            continue  # Skip any handling for the objective constraint
 
-#     model.update()
-#     # Modify the objective coefficients or redefine the objective
-#     for v in model.getVars():
-#         v.obj = 1.0  # Set a new objective coefficient for each variable
-#     model.setObjective(gp.quicksum(v for v in model.getVars()), GRB.MINIMIZE)  # Redefine the objective function
+    model.update()
+    # Modify the objective coefficients or redefine the objective
+    for v in model.getVars():
+        v.obj = 1.0  # Set a new objective coefficient for each variable
+    model.setObjective(gp.quicksum(v for v in model.getVars()), GRB.MINIMIZE)  # Redefine the objective function
     
-#     return model
+    return model
 
                         #     variable_coeffs[linked_var] = coefficient
     # Return the detected auxiliary objective variable and its linked variable coefficients
-    return objective_var, variable_coeffs, equation
-
 
 # def modify_mps_objective(file_path, output_path):
 #     """
@@ -535,3 +533,74 @@ def standard_form(model):
 #         modified_file.writelines(modified_mps_content)
 #     print(f"Modified MPS file saved to: {output_path}")
 
+def sensitivity_analysis(modelo, datos):
+    if modelo in datos:
+        modelo_datos = datos[modelo]
+        modelo_primal = modelo_datos.get('primal', {})
+        modelo_dual = modelo_datos.get('dual', {})
+        modelo_pr_eps = modelo_primal.get('epsilon', [])
+        modelo_pr_of = modelo_primal.get('objective_function', [])
+        modelo_pr_dv = modelo_primal.get('decision_variables', [])
+        modelo_pr_ci = modelo_primal.get('changed_indices', [])
+        modelo_pr_cv = modelo_primal.get('constraint_violation', [])
+        modelo_pr_ofod = modelo_primal.get('of_original_decision', [])
+        modelo_pr_time = modelo_primal.get('execution_time', [])
+        modelo_du_dv = modelo_dual.get('decision_variables', [])
+        
+        # Cálculo de degradación de la función objetivo original
+        divisor = modelo_pr_of[0] if modelo_pr_of else None
+        modelo_pr_of_pu = [elemento / divisor for elemento in modelo_pr_of] if divisor else None
+        
+        # Cálculo de degradación de la función objetivo original
+        divisor1 = modelo_pr_ofod[0] if modelo_pr_ofod else None
+        modelo_pr_ofod_pu = [elemento / divisor1 for elemento in modelo_pr_ofod] if divisor1 else None
+        
+        ## Cálculo de INFEASIBILITY INDEX
+        cifra_referencia = 1e-6
+        modelo_pr_cv_sin_nan = remove_nan_sublists(modelo_pr_cv)
+        modelo_pr_cv_filtrado = set_values_below_threshold_to_zero(modelo_pr_cv_sin_nan, cifra_referencia)
+        producto_cv_vd = multiply_matrices(modelo_pr_cv_filtrado, modelo_du_dv)
+        suma_producto = sum_sublists(producto_cv_vd)
+        infeasiblity_index = [x / abs(modelo_pr_ofod[0]) for x in suma_producto]
+        
+        ## Cálculo de PROBLEM COMPLEXITY
+        ## Cálculo de la media de la constraint violations
+        modelo_pr_cv_medias = calculate_means(modelo_pr_cv)
+        
+        ## Cálculo de los índices cambiados a 0 de la matriz A
+        acumulado_modelo_ci = calculate_lengths(modelo_pr_ci)
+        # convert_late_zeros_to_nan(acumulado_modelo_ci) # ¿Qué es esta función?
+        elementos_A_totales = len(modelo_pr_dv) * len(modelo_du_dv)
+        
+        ## Ahora calculamos el número de no 0s en la matriz A, para cada valor de epsilon.
+        ## Esto lo podemos calcular mediante el número de indices que cambian en cada nivel de epsilon
+        elementos_A_que_se_hacen_0_pu = [x / elementos_A_totales for x in acumulado_modelo_ci]
+        complexity_problem = [1 - x for x in elementos_A_que_se_hacen_0_pu]
+        
+        suma_objfunc_unfeasiblity = [a + b for a, b in zip(modelo_pr_ofod_pu, infeasiblity_index)]
+        
+        ## PROBLEM COMPLEXITY, con el tiempo de ejecución (comentado en el código original)
+        # modelo_pr_time1 = modelo_pr_time[1:]
+        # #Convertir los tiempos a números flotantes
+        # modelo_pr_time1 = [float(tiempo.split(':')[2]) for tiempo in modelo_pr_time1]
+        # divisor = modelo_pr_time1[0] if modelo_pr_time1 else None
+        # modelo_pr_time_pu = [elemento / divisor for elemento in modelo_pr_time1] if divisor else None
+        # complexity_problem = modelo_pr_time_pu
+        
+        ## GRÁFICAS
+        titulo1 = (modelo + " Objective function degradation")
+        titulo2 = (modelo + " Infeasibility evolution")
+        titulo3 = (modelo + " Complexity evolution")
+        objective_function = "Objective function"
+        complexity = "Complexity"
+        infeasibility = "Infeasibility"
+        
+        # plot1(modelo_pr_eps, modelo_pr_of_pu, titulo1, objective_function)
+        # plot1(modelo_pr_eps, infeasiblity_index, titulo2, infeasibility)
+        # plot1(modelo_pr_eps, complexity_problem, titulo3, complexity)
+        
+        plot_subplots(modelo_pr_eps, modelo_pr_of_pu, infeasiblity_index, complexity_problem, titulo1, titulo2, titulo3)
+        return
+    else:
+        print(f"El modelo '{modelo}' no se encontró en los datos proporcionados.")
+        return None

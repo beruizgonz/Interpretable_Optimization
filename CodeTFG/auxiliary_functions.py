@@ -1,5 +1,6 @@
 from matplotlib import pyplot as plt
 import numpy as np
+import os
 # Function to calculate the media of a list.
 def calculate_means(lst):
     means = []
@@ -101,6 +102,41 @@ def plot1(model_pr_epsilon, vector1, title, name1):
     plt.xlim(x_axis[0], x_axis[-1]) # Adjust x-axis limits
     # Show the graph
     plt.show()
+
+
+def plot_subplots(folder, model_name, vector_epsilon, vector1, vector2, vector3, name1, name2, name3):
+    # Determine the maximum length of the vectors
+    max_length = max(len(vector_epsilon), len(vector1), len(vector2), len(vector3[0]))
+
+    # Generate the x-axis with the same length as the longest vector
+    total, rows, cols = vector3[0], vector3[1], vector3[2]
+    x_axis = vector_epsilon[:max_length]
+    
+    # Plot with subplots
+    fig, axs = plt.subplots(3, 1, figsize=(8, 18))
+
+    # For the first subplot I want the y-axis to be 0 to 100
+    axs[0].plot(x_axis[:len(vector1)], vector1)
+    axs[1].plot(x_axis[:len(vector2)], vector2)
+    axs[2].plot(x_axis[:len(total)], total)
+    axs[2].plot(x_axis[:len(rows)], rows)   
+    axs[2].plot(x_axis[:len(cols)], cols)
+
+    # Set labels and title with font sizes
+    axs[0].set_title(name1, fontsize=12)
+    axs[1].set_title(name2, fontsize=12)
+    axs[2].set_title(name3, fontsize=12)
+
+    # ax[2] add legend
+    axs[2].legend(['Total', 'Rows', 'Columns'])
+
+        # Set a title for the entire plot
+    fig.suptitle(f'Sparsification indexes for {model_name} problem', fontsize=16)
+    save_path = os.path.join(folder, f'sparsification_indexes_{model_name}.png')
+    plt.savefig(save_path)
+    #plt.show()
+    plt.close()
+
 
 
 def convert_late_zeros_to_nan(vector):

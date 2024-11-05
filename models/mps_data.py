@@ -76,6 +76,7 @@ def detect_objective_and_coefficients(file_path):
                             #If the variable is already in the dictionary, sum up the coefficients
                         variable_coeffs[var_name] = coefficient
                         # else:
+    return objective_var, variable_coeffs, equation
 
 def modify_mps_objective(file_path, output_path):
     """
@@ -217,6 +218,9 @@ if __name__ == '__main__':
     GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
     if not os.path.exists(GAMS_path_modified):
         os.makedirs(GAMS_path_modified)
+    # file_path = os.path.join(GAMS_path, 'DINAM.mps')
+    # output_path = os.path.join(GAMS_path_modified, 'DINAM.mps')
+    # modify_mps_objective(file_path, output_path)
     for file in os.listdir(GAMS_path):
         if file.endswith('.mps'):
             file_path = os.path.join(GAMS_path, file)

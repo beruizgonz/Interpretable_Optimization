@@ -1,79 +1,23 @@
 import json
+import os
 from auxiliary_functions import *
 from statistics import *
-import os 
+from indexes import *
 
-def analisis_de_sensibilidad(modelo, datos):
+
+def sensitivity_analysis(folder, modelo, datos):
     if modelo in datos:
         modelo_datos = datos[modelo]
         modelo_primal = modelo_datos.get('primal', {})
-        modelo_dual = modelo_datos.get('dual', {})
         modelo_pr_eps = modelo_primal.get('epsilon', [])
-        modelo_pr_of = modelo_primal.get('objective_function', [])
-        modelo_pr_dv = modelo_primal.get('decision_variables', [])
-        modelo_pr_ci = modelo_primal.get('changed_indices', [])
-        modelo_pr_cv = modelo_primal.get('constraint_violation', [])
-        modelo_pr_ofod = modelo_primal.get('of_original_decision', [])
-        modelo_pr_time = modelo_primal.get('execution_time', [])
-        modelo_du_dv = modelo_dual.get('decision_variables', [])
-        
-        # Cálculo de degradación de la función objetivo original
-        divisor = modelo_pr_of[0] if modelo_pr_of else None
-        modelo_pr_of_pu = [elemento / divisor for elemento in modelo_pr_of] if divisor else None
-        
-        # Cálculo de degradación de la función objetivo original
-        divisor1 = modelo_pr_ofod[0] if modelo_pr_ofod else None
-        modelo_pr_ofod_pu = [elemento / divisor1 for elemento in modelo_pr_ofod] if divisor1 else None
-        
-        ## Cálculo de INFEASIBILITY INDEX
-        cifra_referencia = 1e-6
-        modelo_pr_cv_sin_nan = remove_nan_sublists(modelo_pr_cv)
-        modelo_pr_cv_filtrado = set_values_below_threshold_to_zero(modelo_pr_cv_sin_nan, cifra_referencia)
-        producto_cv_vd = multiply_matrices(modelo_pr_cv_filtrado, modelo_du_dv)
-        suma_producto = sum_sublists(producto_cv_vd)
-        infeasiblity_index = [x / abs(modelo_pr_ofod[0]) for x in suma_producto]
-        
-        ## Cálculo de PROBLEM COMPLEXITY
-        ## Cálculo de la media de la constraint violations
-        modelo_pr_cv_medias = calculate_means(modelo_pr_cv)
-        
-        ## Cálculo de los índices cambiados a 0 de la matriz A
-        acumulado_modelo_ci = calculate_lengths(modelo_pr_ci)
-        # convert_late_zeros_to_nan(acumulado_modelo_ci) # ¿Qué es esta función?
-        elementos_A_totales = len(modelo_pr_dv) * len(modelo_du_dv)
-        
-        ## Ahora calculamos el número de no 0s en la matriz A, para cada valor de epsilon.
-        ## Esto lo podemos calcular mediante el número de indices que cambian en cada nivel de epsilon
-        elementos_A_que_se_hacen_0_pu = [x / elementos_A_totales for x in acumulado_modelo_ci]
-        complexity_problem = [1 - x for x in elementos_A_que_se_hacen_0_pu]
-        
-        suma_objfunc_unfeasiblity = [a + b for a, b in zip(modelo_pr_ofod_pu, infeasiblity_index)]
-        
-        ## PROBLEM COMPLEXITY, con el tiempo de ejecución (comentado en el código original)
-        # modelo_pr_time1 = modelo_pr_time[1:]
-        # #Convertir los tiempos a números flotantes
-        # modelo_pr_time1 = [float(tiempo.split(':')[2]) for tiempo in modelo_pr_time1]
-        # divisor = modelo_pr_time1[0] if modelo_pr_time1 else None
-        # modelo_pr_time_pu = [elemento / divisor for elemento in modelo_pr_time1] if divisor else None
-        # complexity_problem = modelo_pr_time_pu
-        
-        ## GRÁFICAS
-        titulo1 = (modelo + " Objective function degradation")
-        titulo2 = (modelo + " Infeasibility evolution")
-        titulo3 = (modelo + " Complexity evolution")
-        objective_function = "Objective function"
-        complexity = "Complexity"
-        infeasibility = "Infeasibility"
-        
-        plot1(modelo_pr_eps, modelo_pr_of_pu, titulo1, objective_function)
-        plot1(modelo_pr_eps, infeasiblity_index, titulo2, infeasibility)
-        plot1(modelo_pr_eps, complexity_problem, titulo3, complexity)
-        
-        print(elementos_A_que_se_hacen_0_pu)
-        return
-    else:
-        print(f"El modelo '{modelo}' no se encontró en los datos proporcionados.")
-        return None
+
+    optimaility = optimality_index(modelo, datos)
+    infeasibility = infeasibility_index(modelo, datos)
+    complexity = complexity_index(modelo, datos)
+
+    plot_subplots(folder, modelo, modelo_pr_eps, optimaility, infeasibility, complexity, 'Optimality Index', 'Infeasibility Index', 'Complexity Index')
+    return
+
 
 def global_sensitivity_analysis(models, data):
     # Define variables to store the data
@@ -171,10 +115,10 @@ def global_sensitivity_analysis(models, data):
             quartile_25 = [q[0] for q in quartiles]
             quartile_75 = [q[1] for q in quartiles]
 
-        plt.plot(eps_adjusted, mean[:len(eps_adjusted)], '--', label='Mean', color='black')
-        plt.plot(eps_adjusted, median[:len(eps_adjusted)], ':', label='Median', color='blue')
-        plt.plot(eps_adjusted, quartile_25[:len(eps_adjusted)], '-.', label='Quartile 25', color='green')
-        plt.plot(eps_adjusted, quartile_75[:len(eps_adjusted)], '-.', label='Quartile 75', color='red')
+        # plt.plot(eps_adjusted, mean[:len(eps_adjusted)], '--', label='Mean', color='black')
+        # plt.plot(eps_adjusted, median[:len(eps_adjusted)], ':', label='Median', color='blue')
+        # plt.plot(eps_adjusted, quartile_25[:len(eps_adjusted)], '-.', label='Quartile 25', color='green')
+        # plt.plot(eps_adjusted, quartile_75[:len(eps_adjusted)], '-.', label='Quartile 75', color='red')
 
         figure_path = os.path.join(os.getcwd(), 'figures_sparsification')
         if not os.path.exists(figure_path):
@@ -200,23 +144,47 @@ def global_sensitivity_analysis(models, data):
 
 
 if __name__ == '__main__': 
-    # Load the data from the JSON file
-    parent_dir = os.path.dirname(os.getcwd())
+    # # Load the data from the JSON file
+    # parent_dir = os.path.dirname(os.getcwd())
 
-    data_path = os.path.join(parent_dir, 'models/epsilon_sparsification.json')
-    print(os.path.exists(data_path))
-    with open(data_path, 'r') as file:
-        data = json.load(file)
+    # data_path = os.path.join(parent_dir, 'models/epsilon_sparsification.json')
+    # print(os.path.exists(data_path))
+    # with open(data_path, 'r') as file:
+    #     data = json.load(file)
 
-    modelos_tipo1 = ['AIRSP', 'PRODMIX', 'SPARTA' ]
-    #graphed:
-    modelos_tipo2 = ['AIRCRAFT','SRKANDW','UIMP']
-    #grahped:
-    modelos_tipo3 = ['GUSSEX1','GUSSGRID','SENSTRAN','TRNSPORT']
-    modelos_tipo4 = ['PORT']
+    # modelos_tipo1 = ['AIRSP', 'PRODMIX', 'SPARTA' ]
+    # #graphed:
+    # modelos_tipo2 = ['AIRCRAFT','SRKANDW','UIMP']
+    # #grahped:
+    # modelos_tipo3 = ['GUSSEX1','GUSSGRID','SENSTRAN','TRNSPORT']
+    # modelos_tipo4 = ['PORT']
 
-    # Perform the global sensitivity analysis
-    global_sensitivity_analysis(modelos_tipo4, data)
-    global_sensitivity_analysis(modelos_tipo3, data)
-    global_sensitivity_analysis(modelos_tipo2, data)
-    global_sensitivity_analysis(modelos_tipo1, data)
+    # # Perform the global sensitivity analysis
+    # # global_sensitivity_analysis(modelos_tipo4, data)
+    # # global_sensitivity_analysis(modelos_tipo3, data)
+    # # global_sensitivity_analysis(modelos_tipo2, data)
+    # # global_sensitivity_analysis(modelos_tipo1, data)
+    # sensitivity_analysis('AIRSP', data)
+    project_root = os.path.dirname(os.getcwd())
+    figures_sparsification = os.path.join(project_root, 'figures/figures_sparsification')
+    zeroepsilon_rows = os.path.join(project_root, 'figures/zeroepsilon_rows')
+    # if folder does not exist, create it
+    if not os.path.exists(figures_sparsification):
+        os.makedirs(figures_sparsification)
+
+    results_foder = os.path.join(project_root, 'results')
+    sparsification_folder = os.path.join(results_foder, 'epsilon_sparsification_new')
+    rowsepsilon_folder = os.path.join(results_foder, 'zeroepsilon_rows_new')
+    print(os.path.exists(sparsification_folder))
+    for root, dirs, files in os.walk(sparsification_folder):
+        for file in files:
+            if file.endswith('.json'):
+                print(f"Processing file {file}")
+                if 'MARCO' in file:
+                    continue
+                else:
+                    with open(os.path.join(root, file), 'r') as f:
+                        data = json.load(f)
+                        for model in data.keys():
+                            sensitivity_analysis(figures_sparsification, model, data)
+                

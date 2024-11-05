@@ -82,10 +82,11 @@ class PresolvepsilonOperations:
             self.eliminate_zero_rows_operation(epsilon = epsilon)
         
         if self.opts.sparsification:
+            print("Sparsification operation")
             self.sparsification_operation(epsilon = epsilon)
 
         return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
-                self.change_dictionary, self.operation_table)    
+                self.change_dictionary, self.operation_table)  
 
 
     def sparsification_operation(self,epsilon = 1e-6):
@@ -94,7 +95,6 @@ class PresolvepsilonOperations:
         """
         A_norm, _, _ = normalize_features(self.A, self.b)
         self.ub = np.array(self.ub)
-
         # Covert the matrix to a CSR format
         A_norm = csr_matrix(A_norm)
         # Convert A_norm to an array
@@ -107,6 +107,7 @@ class PresolvepsilonOperations:
         np.fill_diagonal(ones, 0)
         max_activity_variable = max_sparsification @ ones
         upper_bound_matrix = A_norm * self.ub
+    
         # print(upper_bound_matrix[2,0])
         # print(max_activity_variable[2,0])
         # only divide upper_bound / max_activity if finite values are present (!= 0)
@@ -115,6 +116,8 @@ class PresolvepsilonOperations:
                         upper_bound_matrix / max_activity_variable,
                         np.inf
                     )
+        #epsilon_matrix = upper_bound_matrix / max_activity_variable
+
         #print(epsilon_matrix)
         # look for the indices of the elements that are less than epsilon
         indices = np.where(np.abs(epsilon_matrix) < epsilon)
@@ -180,9 +183,9 @@ class PresolvepsilonOperations:
                     
 
     def eliminate_zero_rows_operation(self, epsilon):
-        original_A = self.A.copy()
+        original_A = self.A.A.copy()
         A_norm, _, _ = normalize_features(self.A, self.b)
-        num_rows, num_cols = A_norm.shape
+        num_rows, num_cols = A_norm.shape  
         rows_to_delete = []
 
         # Identify rows to be marked based on the norm criteria
@@ -197,22 +200,24 @@ class PresolvepsilonOperations:
                 rows_to_delete.append(i)
 
         #print(rows_to_delete)
-        rows_to_keep = []
-        for i in rows_to_delete:
-            if self.b[i] <= 0:
-                delete = True
-            else:
-                rows_to_keep.append(i)
-                # warnings.warn(f"Model is infeasible due to a non-redundant zero row at index {i}.")
+        # rows_to_keep = []
+        # for i in rows_to_delete:
+        #     if self.b[i] <= 0:
+        #         delete = True
+        #     else:
+        #         rows_to_keep.append(i)
+        #         # warnings.warn(f"Model is infeasible due to a non-redundant zero row at index {i}.")
 
-        # Update rows_to_delete based on rows_to_keep
-        rows_to_delete = [i for i in rows_to_delete if i not in rows_to_keep]
+        # # Update rows_to_delete based on rows_to_keep
+        # rows_to_delete1 = [i for i in rows_to_delete if i not in rows_to_keep]
 
         #print(rows_to_delete)
         # Convert the matrix to a format that supports assignment, like COO or LIL
         A_modifiable = self.A.tolil()
         for i in rows_to_delete:
             A_modifiable[i, :] = 0  # Set the entire row to zero
+            self.b[i] = 0
         # Convert back to CSR format
+
         self.A = A_modifiable.tocsr()
         self.change_dictionary["Eliminate Zero Rows"]["Rows"] = rows_to_delete
