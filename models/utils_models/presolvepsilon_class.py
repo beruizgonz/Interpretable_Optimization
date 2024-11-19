@@ -2,7 +2,7 @@ import numpy as np
 from scipy.sparse import csr_matrix
 from utils_models.utils_functions import get_model_matrices, \
     find_corresponding_negative_rows_with_indices, nested_dict, linear_dependency, normalize_features, \
-    matrix_sparsification, calculate_bounds2, build_dual_model_from_json, build_model_from_json
+    matrix_sparsification, calculate_bounds, build_dual_model_from_json, build_model_from_json
 from collections import defaultdict
 import warnings
 warnings.filterwarnings("ignore", category=RuntimeWarning)
@@ -59,7 +59,7 @@ class PresolvepsilonOperations:
         if self.model is None:
             raise ValueError("Model is not provided.")
         
-        lb, new = calculate_bounds2(model)
+        lb, new = calculate_bounds(model)
         path = os.path.join(os.getcwd(), 'model_matrices.json')
         model_bounds = build_model_from_json(path)
           
@@ -84,6 +84,9 @@ class PresolvepsilonOperations:
         if self.opts.sparsification:
             print("Sparsification operation")
             self.sparsification_operation(epsilon = epsilon)
+
+        if self.opts.operate_epsilon_cols:
+            self.eliminate_zero_columns_operation(epsilon = epsilon)
 
         return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
                 self.change_dictionary, self.operation_table)  
@@ -125,61 +128,6 @@ class PresolvepsilonOperations:
         A_modifiable[indices] = 0
         self.A = A_modifiable.tocsr()
 
-        #for i in range(A_norm.shape[0]):
-    
-            # row = A_norm.getrow(i)  # Get the i-th row as a sparse matrix
-            # row_data = row.data     # Non-zero values in the row
-            # row_indices = row.indices  # Column indices corresponding to the non-zero values
-
-            # # Create boolean masks for positive and negative coefficients
-            # positive_mask = row_data > 0
-            # negative_mask = row_data < 0
-
-            # # Get the column indices of positive and negative coefficients
-            # positive_coeff_indices = row_indices[positive_mask]
-            # negative_coeff_indices = row_indices[negative_mask]
-
-            # # If you need the actual coefficients:
-            # positive_coeff_values = row_data[positive_mask]
-            # negative_coeff_values = row_data[negative_mask]
-            # #print(positive_coeff_indices)
-            # lb = self.lb[positive_coeff_indices]
-            # ub = self.ub[positive_coeff_indices]
-            # print(lb)
-            # print(lb.shape)
-            # print(ub.shape)
-            # print(positive_coeff_values.shape)
-            # print(positive_coeff_indices.shape)
-            # # Now you can proceed with your logic using these indices and values
-        #     for idx, j in enumerate(positive_coeff_indices):
-        #         # Access the positive coefficient value
-        #         coeff_value = positive_coeff_values[idx]
-        #         #Proceed with your logic for positive coefficients
-        #         # Example:
-        #         positive_bound = self.ub[j]
-        #         cond = coeff_value / positive_bound < epsilon
-        #         # Handle 'cond' accordingly
-        #         if cond: 
-        #             A_modifiable[i, j] = 0
-        #             # self.change_dictionary["Sparsification"]["Rows"].append(i)
-        #             # self.change_dictionary["Sparsification"]["Columns"].append(j)
-        #             # self.change_dictionary["Sparsification"]["Values"].append(coeff_value)
-        #             # self.change_dictionary["Sparsification"]["Bounds"].append(positive_bound)
-
-        #     for idx, j in enumerate(negative_coeff_indices):
-        #         # Access the negative coefficient value
-        #         coeff_value = negative_coeff_values[idx]
-        #         # Proceed with your logic for negative coefficients
-        #         # Example:
-        #         negative_bound = self.lb[j]
-        #         cond = coeff_value / negative_bound < epsilon
-        #         if cond:
-        #             A_modifiable[i, j] = 0
-        #             # self.change_dictionary["Sparsification"]["Rows"].append(i)
-        #             # self.change_dictionary["Sparsification"]["Columns"].append(j)
-        #             # self.change_dictionary["Sparsification"]["Values"].append(coeff_value)
-        #             # self.change_dictionary["Sparsification"]["Bounds"].append(negative_bound)
-        # self.A = A_modifiable.tocsr()
                     
 
     def eliminate_zero_rows_operation(self, epsilon):
@@ -194,10 +142,11 @@ class PresolvepsilonOperations:
             row_norm = np.linalg.norm(row.toarray())
             abs_coeff = np.abs(row.data)
             
-            # if row_norm / abs(self.b[i]) < epsilon:
-            #     rows_to_delete.append(i)
-            if np.all(abs_coeff / abs(self.b[i]) < epsilon):
+            if row_norm / abs(self.b[i]) < epsilon:
                 rows_to_delete.append(i)
+
+            # if np.all(abs_coeff / abs(self.b[i]) < epsilon):
+            #     rows_to_delete.append(i)
 
         #print(rows_to_delete)
         # rows_to_keep = []
@@ -221,3 +170,22 @@ class PresolvepsilonOperations:
 
         self.A = A_modifiable.tocsr()
         self.change_dictionary["Eliminate Zero Rows"]["Rows"] = rows_to_delete
+    
+    def eliminate_zero_columns_operation(self, epsilon):
+        original_A = self.A.A.copy()
+        A_norm, _, _ = normalize_features(self.A, self.b)
+        num_rows, num_cols = A_norm.shape  
+        columns_to_delete = []
+
+        # Identify columns to be marked based on the norm criteria
+        for i in range(num_cols):
+            column = A_norm.getcol(i)
+            column_norm = np.linalg.norm(column.toarray())
+            abs_coeff = np.abs(column.data)
+            if column_norm < epsilon:
+                columns_to_delete.append(i)
+
+        # Convert the matrix to a format that supports assignment, like COO or LIL
+        A_modifiable = self.A.tolil()
+        for i in columns_to_delete:
+            A_modifiable[:, i] = 0

@@ -1,12 +1,12 @@
 from datetime import datetime
 import logging
-from utils_models.presolve_class import PresolveComillas
+from models.utils_models.presolve_class import PresolveComillas
 from collections import defaultdict
 import gurobipy as gp
 import sys
 import os
-from utils_models.presolvepsilon_class import PresolvepsilonOperations
-from utils_models.utils_functions import nested_dict, get_model_matrices, \
+from models.utils_models.presolvepsilon_class import PresolvepsilonOperations
+from models.utils_models.utils_functions import nested_dict, get_model_matrices, \
     measuring_constraint_infeasibility, save_json, build_model_from_json
 import numpy as np
 import math

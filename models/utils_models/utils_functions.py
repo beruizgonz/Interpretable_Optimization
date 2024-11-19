@@ -1930,7 +1930,7 @@ def gurobi_to_pyomo(gurobi_model):
     return pyomo_model
 
 
-def calculate_bounds2(model): 
+def calculate_bounds(model): 
 
     A, b, c, co, lb, ub, of_sense, cons_sense, variable_names = get_model_matrices(model)
     n_constraints, n_variables = A.shape
@@ -1969,6 +1969,7 @@ def calculate_bounds2(model):
 
         if np.allclose(ub, ub_new, rtol=1e-6, atol=1e-6) and np.allclose(lb, lb_new, rtol=1e-6, atol=1e-6):
             convergence = True
+
             print("Convergence reached.")
         else:
             ub = ub_new
@@ -1977,3 +1978,30 @@ def calculate_bounds2(model):
     save_json(A, b, c, lb_new, ub_new, of_sense, cons_sense, "model_matrices.json", co, variable_names)
     return lb_new, ub_new
    
+
+
+def add_new_restrictions_variables(model):
+    """
+    Add new restrictions to the model. The restrictions I want to add are based on the variables of the model when I solve it
+    I want to add for each variable a restriction that the variable must be less than 10*variable_value. For variable value I have to solve
+    """
+    # Copy the model
+    new_model = model.copy()
+    # Solve the model
+    model.setParam('OutputFlag', 0)
+    model.optimize()
+    # Get the values of the variables
+    variables = new_model.getVars()
+
+    # Add a new constraint for each variable using the values from the original model
+    for var in variables:
+        original_var = model.getVarByName(var.VarName)
+        if original_var.X < 0: 
+            new_model.addConstr(var >= 10 * original_var.X)
+        else:
+            new_model.addConstr(var <= 10 * original_var.X)
+
+    # Update the model to integrate the new constraints
+    new_model.update()
+
+    return new_model

@@ -1,6 +1,7 @@
 from matplotlib import pyplot as plt
 import numpy as np
 import os
+
 # Function to calculate the media of a list.
 def calculate_means(lst):
     means = []
@@ -111,12 +112,19 @@ def plot_subplots(folder, model_name, vector_epsilon, vector1, vector2, vector3,
     # Generate the x-axis with the same length as the longest vector
     total, rows, cols = vector3[0], vector3[1], vector3[2]
     x_axis = vector_epsilon[:max_length]
-    
+    print(x_axis)
+    vector1 = np.where(np.isnan(vector1), np.nan, vector1)
+    vector2 = np.where(np.isnan(vector2), np.nan, vector2)
+    total = np.where(np.isnan(total), np.nan, total)
+    rows = np.where(np.isnan(rows), np.nan, rows)
+    cols = np.where(np.isnan(cols), np.nan, cols)
     # Plot with subplots
+    print(len(vector1),(len(x_axis)))
+    print(vector1)
     fig, axs = plt.subplots(3, 1, figsize=(8, 18))
-
+    
     # For the first subplot I want the y-axis to be 0 to 100
-    axs[0].plot(x_axis[:len(vector1)], vector1)
+    axs[0].plot(x_axis, vector1)
     axs[1].plot(x_axis[:len(vector2)], vector2)
     axs[2].plot(x_axis[:len(total)], total)
     axs[2].plot(x_axis[:len(rows)], rows)   
@@ -127,15 +135,88 @@ def plot_subplots(folder, model_name, vector_epsilon, vector1, vector2, vector3,
     axs[1].set_title(name2, fontsize=12)
     axs[2].set_title(name3, fontsize=12)
 
+    axs[0].set_xlabel('Epsilon', fontsize=12)
+    axs[0].set_ylabel('Value', fontsize=12)
+    axs[1].set_xlabel('Epsilon', fontsize=12)
+    axs[1].set_ylabel('Value', fontsize=12)
+
+    axs[0].set_xlim(0, 0.25)  
+    axs[1].set_xlim(0, 0.25)
+    axs[2].set_xlim(0, 0.25)
+
     # ax[2] add legend
     axs[2].legend(['Total', 'Rows', 'Columns'])
+    axs[2].set_xlabel('Epsilon', fontsize=12)
+    axs[2].set_ylabel('Number of elements', fontsize=12)
+
+    axs[0].grid(True)
+    axs[1].grid(True)
+    axs[2].grid(True)
 
         # Set a title for the entire plot
     fig.suptitle(f'Sparsification indexes for {model_name} problem', fontsize=16)
     save_path = os.path.join(folder, f'zero_epsilon_{model_name}.png')
     plt.savefig(save_path)
-    #plt.show()
     plt.close()
+
+
+def plot_subplots1(folder, model_name, vector_epsilon, vector1, vector2, vector3, name1, name2, name3):
+    # Convert the x-axis and vectors to numpy arrays
+    x_axis = np.array(vector_epsilon)
+    vector1 = np.array(vector1)
+    vector2 = np.array(vector2)
+    total, rows, cols = np.array(vector3[0]), np.array(vector3[1]), np.array(vector3[2])
+
+    # Ensure all vectors are of the same length as x_axis by padding with NaN if necessary
+    if len(vector1) < len(x_axis):
+        vector1 = np.append(vector1, [np.nan] * (len(x_axis) - len(vector1)))
+    if len(vector2) < len(x_axis):
+        vector2 = np.append(vector2, [np.nan] * (len(x_axis) - len(vector2)))
+    if len(total) < len(x_axis):
+        total = np.append(total, [np.nan] * (len(x_axis) - len(total)))
+    if len(rows) < len(x_axis):
+        rows = np.append(rows, [np.nan] * (len(x_axis) - len(rows)))
+    if len(cols) < len(x_axis):
+        cols = np.append(cols, [np.nan] * (len(x_axis) - len(cols)))
+
+    # Plot with subplots
+    fig, axs = plt.subplots(3, 1, figsize=(8, 18))
+    
+    # First subplot
+    axs[0].plot(x_axis, vector1)  # Use markers and a line
+    axs[0].set_ylim(0, 100)  # Set the y-axis range to 0 to 100
+    axs[0].set_xlim(0, 0.25)  # Set the x-axis range to match the third plot
+    axs[0].set_title(name1, fontsize=12)
+    axs[0].set_xlabel('Epsilon', fontsize=12)
+    axs[0].set_ylabel('Value', fontsize=12)
+    axs[0].grid(True)
+
+    # Second subplot
+    axs[1].plot(x_axis, vector2)  # Use markers and a line
+    axs[1].set_xlim(0, 0.25)  # Set the x-axis range to match the third plot
+    axs[1].set_title(name2, fontsize=12)
+    axs[1].set_xlabel('Epsilon', fontsize=12)
+    axs[1].set_ylabel('Value', fontsize=12)
+    axs[1].grid(True)
+
+    # Third subplot with three different plots
+    axs[2].plot(x_axis, total)
+    axs[2].plot(x_axis, rows)
+    axs[2].plot(x_axis, cols)
+    axs[2].set_title(name3, fontsize=12)
+    axs[2].set_xlabel('Epsilon', fontsize=12)
+    axs[2].set_ylabel('Number of elements', fontsize=12)
+    axs[2].legend(['Total', 'Rows', 'Columns'])
+    axs[2].grid(True)
+
+    # Set a title for the entire plot
+    fig.suptitle(f'Sparsification indexes for {model_name} problem', fontsize=16)
+
+    # Save the plot to the specified folder
+    save_path = os.path.join(folder, f'zero_epsilon_{model_name}.png')
+    plt.savefig(save_path)
+    plt.close()
+
 
 
 

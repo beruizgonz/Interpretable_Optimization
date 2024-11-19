@@ -71,12 +71,13 @@ def complexity_index(model, data):
         modelo_du_dv = modelo_dual.get('decision_variables', []) 
         rows_pr_changed = modelo_primal.get('rows_changed', [])
         columns_pr_changed = modelo_primal.get('columns_changed', [])
+        total_non_zeros = modelo_primal.get('non_zeros', [])
 
     modelo_pr_cv_medias = calculate_means(modelo_pr_cv)
 
     constraints = len(modelo_pr_cv[0])
-    print(constraints)
     variables = len(modelo_pr_dv[0])
+    total_elements_A = total_non_zeros
     
 
     # Cosntrucción de la matriz A
@@ -93,8 +94,7 @@ def complexity_index(model, data):
         counts_ones = np.count_nonzero(A_matrix)
         # counts the rows with all ones
         counts_ones_rows = np.count_nonzero(np.all(A_matrix, axis=1))
-        counts_ones_columns = np.count_nonzero(np.all(A_matrix, axis=0))
-        total_elements_A = constraints * variables  
+        counts_ones_columns = np.count_nonzero(np.all(A_matrix, axis=0))  
         complexity_index1.append(1 - counts_ones / total_elements_A)
 
 

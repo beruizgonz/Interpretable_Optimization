@@ -55,11 +55,13 @@ def standard_form(original_model):
                     model.chgCoeff(constr, var, 0)  # Zero out the old variable
 
             # Add constraints to enforce original bounds
-            if var.LB > -GRB.INFINITY:
+            if var.LB > -GRB.INFINITY and var.LB < 0:
                 if var.LB == var.UB and var.LB < 0:
                     model.addConstr(var_new == -var.LB, name=f"{var.VarName}_LB")
                 else:
                     model.addConstr(var_new >= var.LB, name=f"{var.VarName}_LB")
+            if var.LB > 0: 
+                model.addConstr(var_new >= var.LB, name=f"{var.VarName}_LB")
             if var.UB < GRB.INFINITY:
                 if var.LB == var.UB and var.LB < 0:
                     model.addConstr(var_new == -var.LB, name=f"{var.VarName}_LB")
