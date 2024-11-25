@@ -318,13 +318,12 @@ def normalize_features(A, b):
     for i in range(A.shape[0]):
         row = A.getrow(i)
         max_value = np.abs(row).max()
-
+        #print(max_value)
         if max_value != 0:
             norm_A[i] = row / max_value
             scalers[i] = max_value
 
     b_norm = b / scalers
-
     return norm_A, b_norm, scalers
 
 
@@ -628,59 +627,6 @@ def build_dual_model_from_json(data_path):
     final_dual = pre_processing_model(model)
 
     return final_dual
-
-def construct_model_from_json(data_path):
-    A, b, c, lb, ub, of_sense, cons_senses, co, variable_names = None, None, None, None, None, None, None, None, None
-
-    # Load data from JSON files
-    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json', 'co.json',
-                  'variable_names.json']
-    for file_name in file_names:
-        file_path = os.path.join(data_path, file_name)
-
-        try:
-            with open(file_path, 'r') as file:
-                data = json.load(file)
-
-                if file_name == 'A.json':
-                    A = np.array(data)
-                elif file_name == 'b.json':
-                    b = np.array(data)
-                elif file_name == 'c.json':
-                    c = np.array(data)
-                elif file_name == 'lb.json':
-                    lb = np.array(data)
-                elif file_name == 'ub.json':
-                    ub = np.array(data)
-                elif file_name == 'of_sense.json':
-                    of_sense = data
-                elif file_name == 'cons_senses.json':
-                    cons_senses = data
-                elif file_name == 'co.json':
-                    co = data
-                elif file_name == 'variable_names.json':
-                    variable_names = data
-        except FileNotFoundError:
-            # Skip if the file does not exist
-            continue
-
-    # Create a Gurobi model and add variables
-    num_variables = len(c)
-    model = gp.Model()
-    model.addMVar(num_variables, lb=lb, ub=ub, name=variable_names)
-    model.update()
-
-    b = np.array(b)
-    c = np.array(c)
-
-    # Set the objective function
-    model.setObjective(c @ model.getVars(), of_sense)
-
-    # Add constraints they are all equality constraints
-    for i in range(A.shape[0]):
-        model.addConstr(A[i] @ model.getVars() == b[i], name=f'constraint_{i}')
-    model.update()
-    return model
 
 def construct_dual_model_from_json(data_path):
     A, b, c, lb, ub, of_sense, cons_senses, co, variable_names = None, None, None, None, None, None, None, None, None
@@ -1602,66 +1548,6 @@ def canonical_form(model, minOption=False):
 
     return canonical_model, track_elements
 
-def standard_form1(model):
-    # Step 1: Ensure the model is in minimization form
-    if model.ModelSense != 1:
-        model.setObjective(-1 * model.getObjective(), GRB.MINIMIZE)
-        model.ModelSense = 1  # Set the model sense to minimization
-
-    # Step 2: Ensure all variables are non-negative
-    for var in model.getVars():
-        # Create a new variable with lb=0 and ub=+infinity, same type as 'var'
-        var_new = model.addVar(lb=0, vtype=var.VType, name=f"{var.VarName}_new")
-        model.update()
-
-        # Add constraints to enforce original bounds
-        if var.LB > -GRB.INFINITY:
-            model.addConstr(var_new >= var.LB, name=f"{var.VarName}_LB")
-        if var.UB < GRB.INFINITY:
-            model.addConstr(var_new <= var.UB, name=f"{var.VarName}_UB")
-
-        # Replace 'var' in constraints
-        for constr in model.getConstrs():
-            coeff = model.getCoeff(constr, var)
-            if coeff != 0:
-                model.chgCoeff(constr, var_new, coeff)
-                model.chgCoeff(constr, var, 0)
-
-        # Replace 'var' in the objective function
-        obj_coeff = var.Obj
-        if obj_coeff != 0:
-            model.setObjective(model.getObjective() + obj_coeff * var_new, GRB.MINIMIZE)
-
-        # Remove the original variable from the model
-        model.remove(var)
-
-    model.update()
-
-    # Step 3: Transform all constraints into equalities by introducing slack/surplus variables
-    for constr in model.getConstrs():
-        sense = constr.Sense
-        if sense != GRB.EQUAL:
-            # Add slack or surplus variable based on constraint type
-            slack_var = model.addVar(lb=0, name=f"slack_{constr.ConstrName}")
-            model.update()
-
-            # Add slack or surplus depending on the sense of the constraint
-            if sense == GRB.LESS_EQUAL:
-                model.chgCoeff(constr, slack_var, 1)
-            elif sense == GRB.GREATER_EQUAL:
-                model.chgCoeff(constr, slack_var, -1)
-
-            # Set the constraint to equality after adding slack/surplus
-            constr.Sense = GRB.EQUAL
-
-        # Exclude the objective function variable from being part of the constraints
-        if constr.ConstrName == 'obj':
-            continue  # Skip any handling for the objective constraint
-
-    model.update()
-
-    return model
-
 def print_model(model): 
     # Print Objective Function
     print("Objective Function:")
@@ -1946,7 +1832,7 @@ def calculate_bounds(model):
     while not convergence:
         iteration += 1
         num_rows, num_cols = A_dense.shape
-        min_activity_matrix = np.where(A_dense < 0, -A_dense *ub, np.where(A_dense > 0,-A_dense * lb, 0))
+        min_activity_matrix = np.where(A_dense < 0, -A_dense *ub, np.where(A_dense > 0, A_dense * lb, 0))
         min_activity = np.where(A_dense < 0, ub, lb)
         ones = np.ones((num_cols, num_cols))  # Create a matrix of ones with the shape (num_cols, num_cols)
         np.fill_diagonal(ones, 0)  # Set the diagonal elements to 0
@@ -1956,7 +1842,7 @@ def calculate_bounds(model):
         ub_matrix = np.where(same_sign, ub_numerator / A_dense, ub)
         ub_new = np.nanmin(ub_matrix, axis=0)
         # # Calculate the new lb
-        max_activity_matrix = np.where(A_dense > 0, -A_dense *ub_new, np.where(A_dense < 0, -A_dense * lb, 0))
+        max_activity_matrix = np.where(A_dense > 0, A_dense *ub_new, np.where(A_dense < 0, -A_dense * lb, 0))
         lb_numerator = b + (max_activity_matrix @ ones)
         #same_sign = np.sign(A_dense) == np.sign(lb_numerator)
         same_sign_positive = (np.sign(A_dense) > 0) & (np.sign(lb_numerator) > 0)
@@ -1969,8 +1855,7 @@ def calculate_bounds(model):
 
         if np.allclose(ub, ub_new, rtol=1e-6, atol=1e-6) and np.allclose(lb, lb_new, rtol=1e-6, atol=1e-6):
             convergence = True
-
-            print("Convergence reached.")
+            print('Convergence reached after', iteration, 'iterations')
         else:
             ub = ub_new
             lb = lb_new
@@ -1996,10 +1881,17 @@ def add_new_restrictions_variables(model):
     # Add a new constraint for each variable using the values from the original model
     for var in variables:
         original_var = model.getVarByName(var.VarName)
-        if original_var.X < 0: 
-            new_model.addConstr(var >= 10 * original_var.X)
-        else:
-            new_model.addConstr(var <= 10 * original_var.X)
+        # Dependence of the sign of the objective function
+        if model.ModelSense == -1:
+            if original_var.X <= 0: 
+                new_model.addConstr(var <= 10 * original_var.X)
+            elif original_var.X >= 0:
+                new_model.addConstr(var >= 10 * original_var.X)
+        elif model.ModelSense == 1:
+            if original_var.X <= 0: 
+                new_model.addConstr(var >= 10 * original_var.X)
+            elif original_var.X >= 0:
+                new_model.addConstr(var <= 10 * original_var.X)
 
     # Update the model to integrate the new constraints
     new_model.update()

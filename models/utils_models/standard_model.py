@@ -11,6 +11,7 @@ def standard_form(original_model):
 
     # Step 1: Ensure the model is in minimization form
     if model.ModelSense != GRB.MINIMIZE:
+        print("Model sense is not minimization")
         model.setObjective(-1 * model.getObjective(), GRB.MINIMIZE)
 
     model.update()
@@ -216,6 +217,60 @@ def standard_form2(model):
     model.update() 
  
     return model 
+
+
+def construct_model_from_json(data_path):
+    A, b, c, lb, ub, of_sense, cons_senses, co, variable_names = None, None, None, None, None, None, None, None, None
+
+    # Load data from JSON files
+    file_names = ['A.json', 'b.json', 'c.json', 'lb.json', 'ub.json', 'of_sense.json', 'cons_senses.json', 'co.json',
+                  'variable_names.json']
+    for file_name in file_names:
+        file_path = os.path.join(data_path, file_name)
+
+        try:
+            with open(file_path, 'r') as file:
+                data = json.load(file)
+
+                if file_name == 'A.json':
+                    A = np.array(data)
+                elif file_name == 'b.json':
+                    b = np.array(data)
+                elif file_name == 'c.json':
+                    c = np.array(data)
+                elif file_name == 'lb.json':
+                    lb = np.array(data)
+                elif file_name == 'ub.json':
+                    ub = np.array(data)
+                elif file_name == 'of_sense.json':
+                    of_sense = data
+                elif file_name == 'cons_senses.json':
+                    cons_senses = data
+                elif file_name == 'co.json':
+                    co = data
+                elif file_name == 'variable_names.json':
+                    variable_names = data
+        except FileNotFoundError:
+            # Skip if the file does not exist
+            continue
+
+    # Create a Gurobi model and add variables
+    num_variables = len(c)
+    model = gp.Model()
+    model.addMVar(num_variables, lb=lb, ub=ub, name=variable_names)
+    model.update()
+
+    b = np.array(b)
+    c = np.array(c)
+
+    # Set the objective function
+    model.setObjective(c @ model.getVars()+ co, GRB.MINIMIZE)
+
+    # Add constraints they are all equality constraints
+    for i in range(A.shape[0]):
+        model.addConstr(A[i] @ model.getVars() == b[i], name=f'constraint_{i}')
+    model.update()
+    return model
 
 def construct_dual_model(standard_model):
 

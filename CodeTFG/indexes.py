@@ -50,6 +50,7 @@ def infeasibility_index(model, data):
     cifra_referencia = 1e-6
     modelo_pr_cv_sin_nan = remove_nan_sublists(modelo_pr_cv)
     modelo_pr_cv_filtrado = set_values_below_threshold_to_zero(modelo_pr_cv_sin_nan, cifra_referencia)
+    modelo_du_dv = [modelo_du_dv]
     producto_cv_vd = multiply_matrices(modelo_pr_cv_filtrado, modelo_du_dv)
     suma_producto = sum_sublists(producto_cv_vd)
     infeasiblity_index = [abs(x) / abs(modelo_pr_ofod[0]) for x in suma_producto]

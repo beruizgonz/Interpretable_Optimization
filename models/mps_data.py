@@ -215,7 +215,7 @@ if __name__ == '__main__':
     # Modify the MPS file in the 'data' directory
     project_root = os.path.dirname(os.getcwd())
     GAMS_path = os.path.join(project_root, 'data/GAMS_library')
-    GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
+    GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified_new')
     if not os.path.exists(GAMS_path_modified):
         os.makedirs(GAMS_path_modified)
     # file_path = os.path.join(GAMS_path, 'DINAM.mps')

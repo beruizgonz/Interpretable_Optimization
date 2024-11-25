@@ -58,7 +58,6 @@ def multiply_matrices(A, B):
     columns_A = len(A[0])
     rows_B = len(B)
     columns_B = len(B[0])
-    
     # Check if the matrices are compatible for multiplication
     if columns_A != columns_B:
         raise ValueError("The matrices cannot be multiplied")
@@ -70,7 +69,7 @@ def multiply_matrices(A, B):
     for i in range(rows_A):
         for j in range(columns_B):
             for k in range(columns_A):
-                C[i][j] = A[i][j] * B[i][j]
+                C[i][j] = A[i][j] * B[0][j]
     return C
 
 def sum_sublists(list_of_lists):
@@ -112,15 +111,13 @@ def plot_subplots(folder, model_name, vector_epsilon, vector1, vector2, vector3,
     # Generate the x-axis with the same length as the longest vector
     total, rows, cols = vector3[0], vector3[1], vector3[2]
     x_axis = vector_epsilon[:max_length]
-    print(x_axis)
+
     vector1 = np.where(np.isnan(vector1), np.nan, vector1)
     vector2 = np.where(np.isnan(vector2), np.nan, vector2)
     total = np.where(np.isnan(total), np.nan, total)
     rows = np.where(np.isnan(rows), np.nan, rows)
     cols = np.where(np.isnan(cols), np.nan, cols)
-    # Plot with subplots
-    print(len(vector1),(len(x_axis)))
-    print(vector1)
+
     fig, axs = plt.subplots(3, 1, figsize=(8, 18))
     
     # For the first subplot I want the y-axis to be 0 to 100
