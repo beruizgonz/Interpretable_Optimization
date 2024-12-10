@@ -167,11 +167,13 @@ if __name__ == '__main__':
     # sensitivity_analysis('AIRSP', data)
     project_root = os.path.dirname(os.getcwd())
     figures_sparsification = os.path.join(project_root, 'figures/sparsification')
-    zeroepsilon_rows = os.path.join(project_root, 'figures/zeroepsilon_rows_norm')
+    zeroepsilon_rows = os.path.join(project_root, 'figures/zeroepsilon_rows_abs')
+    zeroepsilon_cols = os.path.join(project_root, 'figures/zeroepsilon_cols_abs')
 
     results_foder = os.path.join(project_root, 'results')
     sparsification_folder = os.path.join(results_foder, 'epsilon_sparsification')
-    rowsepsilon_folder = os.path.join(results_foder, 'zeroepsilon_rows_norm')
+    rowsepsilon_folder = os.path.join(results_foder, 'zeroepsilon_rows_abs')
+    colsepsilon_folder = os.path.join(results_foder, 'zeroepsilon_cols_abs')
 
     optimun_bounds_folder = os.path.join(results_foder, 'sparsification_optimum_bounds')
     figures_optimum_bounds = os.path.join(project_root, 'figures/sparsification_optimum_bounds')
@@ -184,8 +186,7 @@ if __name__ == '__main__':
     # with open(json_path, 'r') as f:
     #     data = json.load(f)
     # sensitivity_analysis(figures_sparsification, model, data)
-                
-    for root, dirs, files in os.walk(optimun_bounds_folder):
+    for root, dirs, files in os.walk(rowsepsilon_folder):
         for file in files:
             if file.endswith('.json'):
                 print(f"Processing file {file}")
@@ -195,5 +196,5 @@ if __name__ == '__main__':
                     with open(os.path.join(root, file), 'r') as f:
                         data = json.load(f)
                         for model in data.keys():
-                            sensitivity_analysis(figures_optimum_bounds, model, data)
+                            sensitivity_analysis(zeroepsilon_cols, model, data)
                 

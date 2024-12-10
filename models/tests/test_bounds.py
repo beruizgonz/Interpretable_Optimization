@@ -5,6 +5,8 @@ import pandas as pd
 from scipy.sparse import coo_matrix, csr_matrix
 import numpy as np
 
+parent_dir = os.path.dirname(os.getcwd())
+sys.path.append(parent_dir)
 
 from opts import parse_opts
 from utils_models.presolvepsilon_class import PresolvepsilonOperations
@@ -13,6 +15,7 @@ from utils_models.standard_model import standard_form_e1
 
 # Path to the data folder
 parent_dir = os.path.dirname(os.getcwd())
+parent_dir = os.path.dirname(parent_dir)
 GAMS_models_folder = os.path.join(parent_dir, 'data/GAMS_library_modified')
 
 
@@ -94,9 +97,9 @@ if __name__ == '__main__':
         print(f"Bounds information saved successfully to {output_excel_path}")
     except ValueError as e:
         print(f"Error: {e}")
-    model = simple_problem()
-    print_model_in_mathematical_format(model)
-    standar_model = standard_form_e1(model)
-    print_model_in_mathematical_format(standar_model)
-    lb, ub = calculate_bounds(standar_model)    
-    print(lb, ub)
+    # model = simple_problem()
+    # print_model_in_mathematical_format(model)
+    # standar_model = standard_form_e1(model)
+    # print_model_in_mathematical_format(standar_model)
+    # lb, ub = calculate_bounds(standar_model)    
+    # print(lb, ub)

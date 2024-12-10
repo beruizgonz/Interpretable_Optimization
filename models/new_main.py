@@ -15,8 +15,8 @@ import gc
 from opts import parse_opts
 from utils_models.presolvepsilon_class import PresolvepsilonOperations
 from utils_models.utils_functions import *
-from utils_models.standard_model import standard_form1, construct_dual_model, standard_form
-
+from utils_models.standard_model import standard_form1, construct_dual_model, standard_form, standard_form_e1
+ 
 logging.basicConfig()
 log = logging.getLogger(__name__)
 log.setLevel('INFO')
@@ -33,10 +33,10 @@ GAMS_path = os.path.join(project_root, 'data/GAMS_library')
 real_data_path = os.path.join(project_root, 'data/real_data')
 
 GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
-model_path_modified = os.path.join(GAMS_path_modified, 'PHOSDIS.mps')
+model_path_modified = os.path.join(GAMS_path_modified, 'DANWOLFE.mps')
 real_model_path = os.path.join(real_data_path,  'openTEPES_EAPP_2030_sc01_st1.mps')
 
-def load_class(model):
+def load_class(model, opts):
     presolve = PresolvepsilonOperations(model, eliminate_zero_rows_epsilon = True, opts = opts)
     return presolve
 
@@ -105,10 +105,9 @@ def sensitivity_analysis(model, presolve, dual=False, min_threshold=0.015, max_t
     
     # Calculate total iterations for progress bar
     total_iterations = math.ceil(math.log(max_threshold / min_threshold) / math.log(1 + step))
-
     while threshold <= max_threshold:
         print(f"Threshold: {threshold}")
-        (A_new, b, c, lb, ub, of_sense, cons_senses, co, variable_names,
+        (A_new, b_new, c, lb, ub, of_sense, cons_senses, co, variable_names,
         change_dictionary, operation_table) = presolve.orchestrator_presolve_operations(
             model=original_model, epsilon=threshold
         )
@@ -117,17 +116,19 @@ def sensitivity_analysis(model, presolve, dual=False, min_threshold=0.015, max_t
         print('Non zero: ', total_non_zeros)
         A_changed = csr_matrix(A_new)  # Use sparse matrix
         indices = [(int(i), int(j)) for i, j in zip(*non_zeros) if A_changed[i, j] == 0]
-        rows_zero = np.where(~A_changed.toarray().any(axis=1))[0]
-        columns_zero = np.where(~A_changed.toarray().any(axis=0))[0]
+        zero_columns = np.where(A_changed.getnnz(axis=0) == 0)[0]
+        zero_rows = np.where(A_changed.getnnz(axis=1) == 0)[0]
         #print(np.all(A_initial == A_new))
         if len(indices) > 0:
             print('Changed: ', len(indices))
+        print('Zero columns: ', len(zero_columns))
+        print('Zero rows: ', len(zero_rows))
         
-        save_json(A_changed, b, c, lb, ub, of_sense, cons_senses, opts.save_path, co, variable_names)
+        #save_json(A_changed, b_new, c, lb, ub, of_sense, cons_senses, opts.save_path, co, variable_names)
         # print(lb, ub)
         # print(cons_senses)
         #iterative_model = (construct_dual_model_from_json if dual else construct_model_from_json)(opts.save_path)
-        iterative_model = build_model_from_json(opts.save_path)
+        iterative_model = build_model(A_changed,b_new, c, co, lb, ub, of_sense, cons_senses, variable_names)
         start_time = datetime.now()
         iterative_model.setParam('OutputFlag', 0)
         iterative_model.optimize()
@@ -138,8 +139,8 @@ def sensitivity_analysis(model, presolve, dual=False, min_threshold=0.015, max_t
             eps.append(threshold)
             of.append(iterative_model.objVal)
             changed_indices.append(indices)
-            rows_changed.append(rows_zero)
-            columns_changed.append(columns_zero)
+            rows_changed.append(zero_rows)
+            columns_changed.append(zero_columns)
             dv.append(np.array([var.x for var in iterative_model.getVars()]))
             variables = iterative_model.getVars()
             decisions = np.array([var.x for var in variables])
@@ -151,8 +152,8 @@ def sensitivity_analysis(model, presolve, dual=False, min_threshold=0.015, max_t
             of.append(np.nan)
             of_dec.append(np.nan)
             changed_indices.append(indices)
-            rows_changed.append(rows_zero)
-            columns_changed.append(columns_zero)
+            rows_changed.append(zero_rows)
+            columns_changed.append(zero_columns)
             constraint_viol.append(np.nan)
             dv.append(np.full(len(original_model.getVars()), np.nan))
 
@@ -182,32 +183,37 @@ def sensitivity_analysis(model, presolve, dual=False, min_threshold=0.015, max_t
 
     return results
 
-def sensitivity_analysis_file(file,save_path):
+def sensitivity_analysis_file(file, save_path, opts):
     results = nested_dict()
     # for model_name in os.listdir(folder):
     #     if model_name.endswith('.xlsx') or model_name.endswith('modified.mps') or model_name == 'AJAX.mps':
     #         continue
     #     model_path = os.path.join(folder, model_name)
     model = gp.read(file)
-    model_variables = add_new_restrictions_variables(model)
-    model_variables.setParam('OutputFlag', 0)
-    model_variables.optimize()
-    print(model_variables.objVal)
+    # model_variables = add_new_restrictions_variables(model)
+    # model_variables.setParam('OutputFlag', 0)
+    # model_variables.optimize()
+    # print(model_variables.objVal)
     #model = gp.read(model_path)
     #original_primal, track_elements = canonical_form(model,minOption=True)
-    original_primal = standard_form(model)
+    original_primal = standard_form_e1(model)
     original_primal.setParam('OutputFlag', 0)
     original_primal.optimize()
+    print('Optimal solution found: %s' % (original_primal.objVal))
    
     # Sove orignal model
+    # A, b, c, co, lb_new, ub_new, of_sense, cons_senses, variable_names = calculate_bounds_candidates(original_primal,None)
+    # model_bounds = build_model(A, b, c, co, lb_new, ub_new, of_sense, cons_senses, variable_names)
+    lb, ub = calculate_bounds(original_primal)
+    model_bounds = build_model_from_json('model_matrices.json')
     # A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
     # save_json(A, b, c, lb, ub, of_sense, cons_senses, opts.save_path, co, variable_names)
     # Load the dual model
     model_to_use_dual = construct_dual_model(original_primal)
 
-    presolve = load_class(original_primal)
+    presolve = load_class(model_bounds, opts = opts)
     start_time = time.time()
-    results_problem =  sensitivity_analysis(original_primal, presolve)
+    results_problem =  sensitivity_analysis(model_bounds, presolve, opts)
     model_name = file.split('.')[0]
     model_name = model_name.split('/')[-1]
     results[model_name]['primal'] = results_problem
@@ -219,7 +225,7 @@ def sensitivity_analysis_file(file,save_path):
             )
 
     start_time = time.time()
-    presolve_dual = load_class(model_to_use_dual)
+    presolve_dual = load_class(model_to_use_dual, opts = opts)
     #results_problem_dual = sensitivity_analysis_new(model_to_use_dual, presolve_dual, dual = True)
     # solve the dual model
     # Set the output flag to 0
@@ -237,7 +243,11 @@ def sensitivity_analysis_file(file,save_path):
     
     name = file.split('/')[-1]
     name = name.split('.')[0]
-    model_save_path = os.path.join(save_path, f'epsilon_sparsification_{name}.json')
+    if opts.operate_epsilon_rows:
+        operation = 'rows'
+    elif opts.operate_epsilon_cols:
+        operation = 'cols'
+    model_save_path = os.path.join(save_path, f'epsilon_sparsification_{name}_{operation}.json')
     dict2json(results, model_save_path)
     return results
 
@@ -287,9 +297,12 @@ if __name__ == '__main__':
 
 
     # all_results = nested_dict()
-    sparsification_results = os.path.join(project_root, 'results/epsilon_sparsification')
+    sparsification_results = os.path.join(project_root, 'results/sparsification_optimal_solution')
     results_folder = os.path.join(project_root, 'results/epsilon_sparsification')
-    zeroepsilon_row_results = os.path.join(project_root, 'results/zeroepsilon_rows_norm_variables')
+    zeroepsilon_row_results = os.path.join(project_root, 'results/rows_optimal_solution')
+    zeroepsilon_col_results = os.path.join(project_root, 'results/cols_optimal_solution')
+    prueba = os.path.join(project_root, 'results/prueba')
+    
     # if not os.path.exists(zeroepsilon_row_results):
     #     os.makedirs(zeroepsilon_row_results)
     # # # Create a list with the models to analyze
@@ -321,13 +334,19 @@ if __name__ == '__main__':
     # # sensitivity_analysis_file(model_path_modified,save_path = zeroepsilon_row_results)
     # # # # if not os.path.exists(sparsification_results):
     # # #     os.makedirs(sparsification_results)
-    for name in os.listdir(GAMS_path_modified):
-        if name == 'INDUS89.mps':
-            continue
-        model_path = os.path.join(GAMS_path_modified, f'{name}')
-        results = sensitivity_analysis_file(model_path,save_path = sparsification_results)
+    # for name in os.listdir(GAMS_path_modified):
+    #     if name == 'INDUS89.mps':
+    #         continue
+    #     model_path = os.path.join(GAMS_path_modified, f'{name}')
+    #     results = sensitivity_analysis_file(model_path,save_path = sparsification_results)
         #all_results.update(results)
-    #sensitivity_analysis_file(real_model_path,save_path = zeroepsilon_row_results)
+    model = gp.read(model_path_modified)
+    opts.operate_epsilon_rows = True
+    sensitivity_analysis_file(model_path_modified, save_path = prueba, opts = opts)
+    print('CHANGE TO COLUMNS')
+    opts.operate_epsilon_cols = True
+    opts.operate_epsilon_rows = False   
+    sensitivity_analysis_file(model_path_modified, save_path = prueba, opts = opts)
     # #dict2json(all_results, 'epsilon_sparsification.json')
  
     # # # model_name = os.path.join(GAMS_path_modified, 'DINAM.mps')

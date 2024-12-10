@@ -24,7 +24,7 @@ GAMS_path = os.path.join(project_root, 'data/GAMS_library')
 GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
 model_path_modified = os.path.join(GAMS_path_modified, 'GUSSGRID.mps')
 results_folder = os.path.join(project_root, 'results')
-save_path = os.path.join(results_folder, 'sparsification_optimum_bounds')
+save_path = os.path.join(results_folder, 'sparsification_optimal_solution')
 
 if not os.path.exists(save_path):
     os.makedirs(save_path)
@@ -42,7 +42,7 @@ def set_new_bounds(file, alpha_min, alpha_max):
     model = gp.read(file)
     try:
         # Solve the model to find the optimal solution
-        model = standard_form(model)
+        model = standard_form_e1(model)
         model.setParam('OutputFlag', 0)
         model.optimize()
 
@@ -99,8 +99,8 @@ def sparsification_bounds(file, save_path, alpha_min = 0.0001, alpha_max= 1000):
             optimal_value = var.x  # Get the optimal value
             if optimal_value is not None:
                 # Set new bounds
-                var.lb = optimal_value * alpha_min
-                var.ub = optimal_value * alpha_max
+                var.lb = optimal_value
+                var.ub = optimal_value
 
         # Update the model to apply new bounds
         model.update()
@@ -178,9 +178,9 @@ if __name__ == '__main__':
     # set_new_bounds(model_path, 0.0001, 1000)
     # Verify that the new bounds are finite
     # verify_bound(GAMS_path)
-    # for name in os.listdir(GAMS_path_modified):
-    #     if name == 'INDUS89.mps':
-    #         continue
-    #     model_path = os.path.join(GAMS_path_modified, f'{name}')
-    #     results = sparsification_bounds(model_path,save_path = save_path, alpha_min = 0.0001, alpha_max = 1000)
-    sparsification_bounds(model_path_modified, save_path = save_path, alpha_min = 0.0001, alpha_max = 10000000)
+    for name in os.listdir(GAMS_path_modified):
+        if name == 'INDUS89.mps':
+            continue
+        model_path = os.path.join(GAMS_path_modified, f'{name}')
+        results = sparsification_bounds(model_path,save_path = save_path, alpha_min = 0.0001, alpha_max = 1000)
+    #sparsification_bounds(model_path_modified, save_path = save_path, alpha_min = 0.0, alpha_max = 0)

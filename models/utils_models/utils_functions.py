@@ -18,6 +18,9 @@ import pyomo.environ as pyo
 from datetime import timedelta
 import scipy
 
+from scipy.sparse import diags, csr_matrix, csc_matrix
+
+
 def nested_dict():
     """
     Create a nested defaultdict.
@@ -125,6 +128,8 @@ def get_model_matrices(model):
     return A, b, c, co, lb, ub, of_sense, cons_senses, variable_names
 
 
+
+
 def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path, co=0, variable_names=None):
     """
     Save matrices and data structures as JSON files, including the sense of optimization and constraints.
@@ -177,6 +182,40 @@ def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path, co=0, variable_
             with open(file_name, 'w') as file:
                 json.dump(data, file)
 
+def build_model(A, b, c, co, lb, ub, of_sense, cons_senses, variable_names):
+    model = gp.Model()
+    num_variables = len(c)
+    x = []
+    for i in range(num_variables):
+        var_name = variable_names[i] if variable_names is not None and i < len(variable_names) else f'x{i + 1}'
+        x.append(model.addVar(lb=lb[i], ub=ub[i], name=var_name))
+    model.update()
+
+    # Set objective function
+    objective_expr = gp.quicksum(c[i] * x[i] for i in range(num_variables))
+    if co is not None:
+        objective_expr += co
+
+    model.setObjective(objective_expr, of_sense)
+
+    # Add constraints
+    for i in range(A.shape[0]):
+        start = A.indptr[i]
+        end = A.indptr[i + 1]
+        variables = A.indices[start:end]
+        coefficients = A.data[start:end]
+
+        constraint_expr = gp.quicksum(coefficients[j] * x[variables[j]] for j in range(len(variables)))
+        if cons_senses[i] == '<' or cons_senses[i] == '<=':
+            model.addConstr(constraint_expr <= b[i], name=f'constraint_{i}')
+        elif cons_senses[i] == '>' or cons_senses[i] == '>=':
+            model.addConstr(constraint_expr >= b[i], name=f'constraint_{i}')
+        elif cons_senses[i] == '=':
+            model.addConstr(constraint_expr == b[i], name=f'constraint_{i}')
+
+    model.update()
+
+    return model
 
 def build_model_from_json(data_path):
     """
@@ -331,7 +370,7 @@ def matrix_sparsification(threshold, A_norm, A):
     """
     Reduce features of a matrix A based on a threshold applied to its normalized form A_norm.
     Used to note how the coefficients affect the overall problem
-    
+
     Parameters:
     threshold (float): The threshold value to apply.
     A_norm (scipy.sparse.csr_matrix): The normalized matrix.
@@ -673,7 +712,7 @@ def construct_dual_model_from_json(data_path):
     # Since all primal constraints are equality constraints, dual variables are unrestricted
     # Create dual variables as an MVar with unrestricted bounds
     dual_vars = model.addMVar(shape=num_variables, lb=-GRB.INFINITY, name='y')
-    
+
     num_variables = len(c)
     model = gp.Model()
     model.addMVar(num_variables, lb=lb, ub=ub, name=variable_names)
@@ -1548,7 +1587,7 @@ def canonical_form(model, minOption=False):
 
     return canonical_model, track_elements
 
-def print_model(model): 
+def print_model(model):
     # Print Objective Function
     print("Objective Function:")
     print(model.getObjective())
@@ -1815,42 +1854,154 @@ def gurobi_to_pyomo(gurobi_model):
 
     return pyomo_model
 
+def compute_min_per_column(n_columns, indptr, data, ub_new):
+    for col in range(n_columns):  # Replace prange with range
+        start = indptr[col]
+        end = indptr[col + 1]
+        if end > start:
+            # Initialize with the first value in the column
+            min_val = data[start]
+            for i in range(start + 1, end):
+                if data[i] < min_val:
+                    min_val = data[i]
+            # Update ub_new with the minimum value found
+            if min_val < ub_new[col]:
+                ub_new[col] = min_val
+    return ub_new
 
-def calculate_bounds(model): 
+import numpy as np
+import scipy.sparse
+
+def calculate_bounds_with_sparse(model):
+    # Extract model matrices
+    A, b, c, co, lb, ub, of_sense, cons_sense, variable_names = get_model_matrices(model)
+    n_constraints, n_variables = A.shape
+
+    # Ensure A is a CSR sparse matrix
+    A_sparse = scipy.sparse.csr_matrix(A) if not scipy.sparse.isspmatrix_csr(A) else A
+
+    b = np.array(b).reshape((-1, 1)).astype(np.float32)
+    ub_new = ub.copy()
+    lb_new = lb.copy()
+    convergence = False
+
+    for iteration in range(100):  # Limit iterations to avoid infinite loops
+        prev_ub = ub_new.copy()
+        prev_lb = lb_new.copy()
+
+        # Calculate min activity
+        min_activity = A_sparse.copy()
+        min_activity.data = np.where(min_activity.data < 0,
+                                     -min_activity.data * ub_new[min_activity.indices],
+                                     min_activity.data * lb_new[min_activity.indices])
+
+        # Update upper bounds
+        for var_idx in range(n_variables):
+            col_start, col_end = A_sparse.indptr[var_idx], A_sparse.indptr[var_idx + 1]
+            row_indices = A_sparse.indices[col_start:col_end]
+            coeffs = A_sparse.data[col_start:col_end]
+
+            for row_idx, coeff in zip(row_indices, coeffs):
+                if coeff != 0:  # Avoid division by zero
+                    # Remove the current variable's contribution
+                    row_start, row_end = A_sparse.indptr[row_idx], A_sparse.indptr[row_idx + 1]
+                    other_coeffs = A_sparse.data[row_start:row_end]
+                    other_indices = A_sparse.indices[row_start:row_end]
+
+                    activity_without_var = min_activity[row_idx, :].sum() - coeff * lb_new[var_idx]
+                    candidate_ub = (b[row_idx] - activity_without_var) / coeff
+
+                    if (coeff > 0 and candidate_ub < ub_new[var_idx]) or (coeff < 0 and candidate_ub > ub_new[var_idx]):
+                        ub_new[var_idx] = candidate_ub
+
+        # Calculate max activity
+        max_activity = A_sparse.copy()
+        max_activity.data = np.where(max_activity.data > 0,
+                                     max_activity.data * ub_new[max_activity.indices],
+                                     -max_activity.data * lb_new[max_activity.indices])
+
+        # Update lower bounds
+        for var_idx in range(n_variables):
+            col_start, col_end = A_sparse.indptr[var_idx], A_sparse.indptr[var_idx + 1]
+            row_indices = A_sparse.indices[col_start:col_end]
+            coeffs = A_sparse.data[col_start:col_end]
+
+            for row_idx, coeff in zip(row_indices, coeffs):
+                if coeff != 0:  # Avoid division by zero
+                    # Remove the current variable's contribution
+                    row_start, row_end = A_sparse.indptr[row_idx], A_sparse.indptr[row_idx + 1]
+                    other_coeffs = A_sparse.data[row_start:row_end]
+                    other_indices = A_sparse.indices[row_start:row_end]
+
+                    activity_without_var = max_activity[row_idx, :].sum() - coeff * ub_new[var_idx]
+                    candidate_lb = (b[row_idx] - activity_without_var) / coeff
+
+                    if (coeff > 0 and candidate_lb > lb_new[var_idx]) or (coeff < 0 and candidate_lb < lb_new[var_idx]):
+                        lb_new[var_idx] = candidate_lb
+
+        # Check for convergence
+        if (np.allclose(prev_ub, ub_new, rtol=1e-6, atol=1e-6) and
+                np.allclose(prev_lb, lb_new, rtol=1e-6, atol=1e-6)):
+            convergence = True
+            print('Convergence reached after', iteration + 1, 'iterations')
+            break
+
+    print('Final lb:', lb_new)
+    print('Final ub:', ub_new)
+    save_json(A_sparse, b, c, lb_new, ub_new, of_sense, cons_sense, "model_matrices.json", co, variable_names)
+
+    return lb_new, ub_new
+
+
+
+def calculate_bounds(model):
 
     A, b, c, co, lb, ub, of_sense, cons_sense, variable_names = get_model_matrices(model)
     n_constraints, n_variables = A.shape
+    # Convert to float32 to avoid overflow
+    #A = A.astype(np.float32)
+
+    # lb = lb.astype(np.float32)
+    # ub = ub.astype(np.float32)
+
 
     # Convert A to a dense array if it's a CSR matrix
     if scipy.sparse.isspmatrix_csr(A):
         A_dense = A.toarray()
     else:
         A_dense = A  # Assume it's already a dense array
+
     convergence = False
     b = np.array(b).reshape((-1, 1))
     iteration = 0
     while not convergence:
-        iteration += 1
         num_rows, num_cols = A_dense.shape
-        min_activity_matrix = np.where(A_dense < 0, -A_dense *ub, np.where(A_dense > 0, A_dense * lb, 0))
-        min_activity = np.where(A_dense < 0, ub, lb)
+        min_activity_matrix = np.where(A_dense < 0, A_dense *ub, np.where(A_dense > 0, A_dense * lb, 0))
+        # 
+        # min_activity = np.where(A_dense < 0, ub, lb)
         ones = np.ones((num_cols, num_cols))  # Create a matrix of ones with the shape (num_cols, num_cols)
         np.fill_diagonal(ones, 0)  # Set the diagonal elements to 0
-        ub_numerator = b + (min_activity_matrix @ ones)
-        same_sign = np.sign(A_dense) == np.sign(ub_numerator)
+
+        ub_numerator = b - (min_activity_matrix @ ones)
+        #print(ub_numerator)
+        #same_sign = np.sign(A_dense) == np.sign(ub_numerator)
+        same_sign_positive = (np.sign(A_dense) > 0) & (np.sign(ub_numerator) > 0)
+        same_sign_negative = (np.sign(A_dense) > 0) & (np.sign(ub_numerator) < 0)
+        same_sign = same_sign_positive | same_sign_negative
         # Calculate the new upper bounds as the minimum over constraints viewing the sign of the denominator and numerator, if they are the same, then the value is the minimum of the two, if they are different, then the value is the maximum of the two
         ub_matrix = np.where(same_sign, ub_numerator / A_dense, ub)
         ub_new = np.nanmin(ub_matrix, axis=0)
+        #print(ub_new)
         # # Calculate the new lb
-        max_activity_matrix = np.where(A_dense > 0, A_dense *ub_new, np.where(A_dense < 0, -A_dense * lb, 0))
-        lb_numerator = b + (max_activity_matrix @ ones)
+        max_activity_matrix = np.where(A_dense > 0, A_dense *ub_new, np.where(A_dense < 0, A_dense * lb, lb))
+        lb_numerator = b - (max_activity_matrix @ ones)
         #same_sign = np.sign(A_dense) == np.sign(lb_numerator)
         same_sign_positive = (np.sign(A_dense) > 0) & (np.sign(lb_numerator) > 0)
-        same_sign_negative = (np.sign(A_dense) < 0) & (np.sign(lb_numerator) < 0) 
+        same_sign_negative = (np.sign(A_dense) < 0) & (np.sign(lb_numerator) < 0)
         same_sign = same_sign_positive & same_sign_negative
         lb_matrix = np.where(same_sign, lb_numerator / A_dense, lb)
         lb_new = np.nanmax(lb_matrix, axis=0)
-
+        lb_new = lb.copy()
         #print('Iteration:', iteration, 'lb:', lb_new, 'ub:', ub_new)
 
         if np.allclose(ub, ub_new, rtol=1e-6, atol=1e-6) and np.allclose(lb, lb_new, rtol=1e-6, atol=1e-6):
@@ -1861,8 +2012,165 @@ def calculate_bounds(model):
             lb = lb_new
 
     save_json(A, b, c, lb_new, ub_new, of_sense, cons_sense, "model_matrices.json", co, variable_names)
+
     return lb_new, ub_new
-   
+
+def calculate_bounds_with_loops(model):
+
+    A, b, c, co, lb, ub, of_sense, cons_sense, variable_names = get_model_matrices(model)
+    n_constraints, n_variables = A.shape
+    A = A.astype(np.float32)
+
+    if scipy.sparse.isspmatrix_csr(A):
+        A_dense = A.toarray()
+    else:
+        A_dense = A
+
+    b = np.array(b).reshape((-1, 1)).astype(np.float32)
+    ub_new = ub.copy()
+    lb_new = lb.copy()
+    convergence = False
+    ub_list = []
+
+    for iteration in range(1):  # Limit to 100 iterations to avoid infinite loops
+        prev_ub = ub_new.copy()
+        prev_lb = lb_new.copy()
+
+        # Upper bound calculation
+        # calculate the min activity for each row
+        min_activity_matrix = np.where(A_dense < 0, -A_dense * ub_new, np.where(A_dense > 0, A_dense * lb_new, 0))
+         
+
+        for var_idx in range(n_variables):
+            for row_idx in range(n_constraints):
+                row = A_dense[row_idx]
+                min_activity = min_activity_matrix[row_idx]
+                ub_numerator = b[row_idx] + np.sum(min_activity)- min_activity_matrix[row_idx, var_idx]
+                if (row[var_idx] > 0 and ub_numerator > 0) or (row[var_idx] < 0 and ub_numerator < 0):
+                    candidate_ub = ub_numerator / row[var_idx]
+                    if candidate_ub < ub_new[var_idx]:
+                        ub_new[var_idx] = candidate_ub
+
+        max_activity_matrix = np.where(A_dense > 0, A_dense * ub_new, np.where(A_dense < 0, -A_dense * lb_new, -np.inf))
+       
+        for var_idx in range(n_variables):
+            for row_idx in range(n_constraints):
+                row = A_dense[row_idx]
+                max_activity = max_activity_matrix[row_idx]
+                
+                lb_numerator = b[row_idx] + np.sum(max_activity)- max_activity_matrix[row_idx,var_idx]
+                if (row[var_idx] > 0 and lb_numerator > 0)  and (row[var_idx] < 0 and lb_numerator < 0):
+                    candidate_lb = lb_numerator / row[var_idx]
+                    if candidate_lb > lb_new[var_idx]:
+                        lb_new[var_idx] = candidate_lb
+
+        if (np.allclose(prev_ub, ub_new, rtol=1e-6, atol=1e-6) and
+                np.allclose(prev_lb, lb_new, rtol=1e-6, atol=1e-6)):
+            convergence = True
+            print('Convergence reached after', iteration + 1, 'iterations')
+            break
+
+    print('Final lb:', lb_new)
+    print('Final ub:', ub_new)
+    save_json(A, b, c, lb_new, ub_new, of_sense, cons_sense, "model_matrices.json", co, variable_names)
+
+    return lb_new, ub_new
+
+def calculate_bounds_with_sparse_only(model):
+
+
+    A, b, c, co, lb, ub, of_sense, cons_sense, variable_names = get_model_matrices(model)
+    n_constraints, n_variables = A.shape
+
+    # Ensure A is a CSR sparse matrix
+    if not scipy.sparse.isspmatrix_csr(A):
+        A_sparse = scipy.sparse.csr_matrix(A)
+    else:
+        A_sparse = A
+
+    b = np.array(b).reshape((-1, 1)).astype(np.float32)
+    ub_new = ub.copy()
+    lb_new = lb.copy()
+    convergence = False
+    print(A.shape)
+    for iteration in range(1):  # Limit to 100 iterations to avoid infinite loops
+        prev_ub = ub_new.copy()
+        prev_lb = lb_new.copy()
+        A_indices = A.indices
+        A_indptr = A.indptr
+        min_activity_matrix = np.where(A.data < 0, -A.data * ub_new[A_indices], np.where(A.data > 0, A.data * lb_new[A_indices], 0))
+
+        for var_idx in range(n_variables):
+            
+            for row_idx in range(n_constraints):
+                # Get the sparse row
+                row = A_sparse.getrow(row_idx)
+                
+                # Get the corresponding min activity row of the current row
+                min_activity = min_activity_matrix[A_indptr[row_idx]:A_indptr[row_idx + 1]]
+                
+                # Find the indices corresponding to the current variable in the row
+                current_var_idx = np.where(A_indices[A_indptr[row_idx]:A_indptr[row_idx + 1]] == var_idx)[0]
+                
+                # If the variable exists in the row
+                if len(current_var_idx) > 0:
+                    # Get the coefficient of the variable in the current row
+                    coeff = A[row_idx, var_idx]
+                    
+                    # Remove the variable's contribution from the min activity
+                    min_activity_without_var = np.delete(min_activity, current_var_idx)
+                    
+                    # Calculate the adjusted numerator
+                    ub_numerator = b[row_idx] - np.sum(min_activity_without_var)
+                    
+                    # Check and update the upper bound if necessary
+                    if coeff != 0:  # Avoid division by zero
+                        candidate_ub = ub_numerator / coeff
+                        if ((coeff > 0 and ub_numerator > 0) or (coeff < 0 and ub_numerator < 0)) and candidate_ub < ub_new[var_idx]:
+                            ub_new[var_idx] = candidate_ub
+
+        max_activity_matrix = np.where(A.data > 0, A.data * ub_new[A_indices], np.where(A.data < 0, -A.data * lb_new[A_indices], -np.inf))
+
+        for var_idx in range(n_variables):
+           for row_idx in range(n_constraints):
+                # Get the sparse row
+                row = A_sparse.getrow(row_idx)
+                
+                # Get the corresponding max activity row of th e current row
+                max_activity = max_activity_matrix[A_indptr[row_idx]:A_indptr[row_idx + 1]]
+                
+                # Find the indices corresponding to the current variable in the row
+                current_var_idx = np.where(A_indices[A_indptr[row_idx]:A_indptr[row_idx + 1]] == var_idx)[0]
+                
+                # If the variable exists in the row
+                if len(current_var_idx) > 0:
+                    # Get the coefficient of the variable in the current row
+                    coeff = A[row_idx, var_idx]
+                    
+                    # Remove the variable's contribution from the max activity
+                    max_activity_without_var = np.delete(max_activity, current_var_idx)
+                    
+                    # Calculate the adjusted numerator for lower bound
+                    lb_numerator = b[row_idx] - np.sum(max_activity_without_var)
+                    
+                    # Check and update the lower bound if necessary
+                    if coeff != 0:  # Avoid division by zero
+                        candidate_lb = lb_numerator / coeff
+                        if ((coeff > 0 and lb_numerator < 0) or (coeff < 0 and lb_numerator > 0)) and candidate_lb > lb_new[var_idx]:
+                            lb_new[var_idx] = candidate_lb
+
+        # Check for convergence
+        if (np.allclose(prev_ub, ub_new, rtol=1e-6, atol=1e-6) and
+                np.allclose(prev_lb, lb_new, rtol=1e-6, atol=1e-6)):
+            convergence = True
+            print('Convergence reached after', iteration + 1, 'iterations')
+            break
+
+    print('Final lb:', lb_new)
+    print('Final ub:', ub_new)
+    save_json(A_sparse, b, c, lb_new, ub_new, of_sense, cons_sense, "model_matrices.json", co, variable_names)
+
+    return lb_new, ub_new
 
 
 def add_new_restrictions_variables(model):
@@ -1883,12 +2191,12 @@ def add_new_restrictions_variables(model):
         original_var = model.getVarByName(var.VarName)
         # Dependence of the sign of the objective function
         if model.ModelSense == -1:
-            if original_var.X <= 0: 
+            if original_var.X <= 0:
                 new_model.addConstr(var <= 10 * original_var.X)
             elif original_var.X >= 0:
                 new_model.addConstr(var >= 10 * original_var.X)
         elif model.ModelSense == 1:
-            if original_var.X <= 0: 
+            if original_var.X <= 0:
                 new_model.addConstr(var >= 10 * original_var.X)
             elif original_var.X >= 0:
                 new_model.addConstr(var <= 10 * original_var.X)
@@ -1897,3 +2205,139 @@ def add_new_restrictions_variables(model):
     new_model.update()
 
     return new_model
+
+
+def calculate_bounds_candidates(model, save_path, max_iterations=100, tol=1e-6):
+    """
+    Iteratively calculate and update upper and lower bounds for variables in a linear programming model
+    until convergence is achieved or the maximum number of iterations is reached.
+
+    Parameters:
+    - model: The linear programming model containing matrices and bounds.
+    - max_iterations: Maximum number of iterations to perform.
+    - tol: Tolerance for convergence (minimum change in bounds to continue iterating).
+
+    Returns:
+    - lb_new: Updated lower bounds as a NumPy array.
+    - ub_new: Updated upper bounds as a NumPy array.
+    """
+
+    A, b, c, co, lb, ub, of_sense, cons_sense, variable_names = get_model_matrices(model)
+    A_sparse = csr_matrix(A)  # Ensure A is in CSR format for efficient row operations
+    n_constraints, n_variables = A_sparse.shape
+    ub_new = ub.copy()
+    lb_new = lb.copy()
+
+    # Precompute necessary components
+    A_data = A_sparse.data
+    A_indices = A_sparse.indices
+    A_indptr = A_sparse.indptr
+
+    # Initialize variables to track convergence
+    converged = False
+    iteration = 0
+
+    bound_trace = {'iteration': [], 'lb': [], 'ub': []}
+    while (not converged) and (iteration < max_iterations):
+        iteration += 1
+        ub_prev = ub_new.copy()
+        lb_prev = lb_new.copy()
+
+        # ======== Step 1: Calculate Upper Bounds ========
+        # Calculate min_activity_matrix using current lb_new and ub_new
+        min_activity_matrix = np.zeros_like(A_data)
+        negative_mask = A_data < 0
+        positive_mask = A_data > 0
+
+        min_activity_matrix[negative_mask] = A_data[negative_mask] * ub_new[A_indices[negative_mask]]
+        min_activity_matrix[positive_mask] = A_data[positive_mask] * lb_new[A_indices[positive_mask]]
+
+        # Compute the total min activity for each constraint
+        min_activity_sums = np.add.reduceat(min_activity_matrix, A_indptr[:-1])
+
+        # Initialize array to store candidate upper bounds
+        candidate_ub = ub_new.copy()
+
+        # Single loop over all non-zero elements to calculate candidate upper bounds
+        for idx in range(len(A_data)):
+            # Determine the row index for the current non-zero element
+            row_idx = np.searchsorted(A_indptr, idx, side='right') - 1
+            var_idx = A_indices[idx]
+            coeff = A_data[idx]
+
+            # Calculate ub_numerator by excluding the current variable's contribution
+            ub_numerator = b[row_idx] - (min_activity_sums[row_idx] - min_activity_matrix[idx])
+
+            # Avoid division by zero
+            if coeff != 0:
+                temp_ub = ub_numerator / coeff
+
+                # Check if the candidate upper bound is valid
+                if (coeff > 0 and ub_numerator > 0): #or (coeff < 0 and ub_numerator < 0):
+                    if temp_ub < candidate_ub[var_idx]:
+                        candidate_ub[var_idx] = temp_ub
+
+        # Update upper bounds with the candidate upper bounds
+        ub_new = np.minimum(ub_new, candidate_ub)
+
+        # ======== Step 2: Calculate Lower Bounds ========
+        # Recalculate min_activity_matrix using updated ub_new and current lb_new
+        max_activity_matrix = np.zeros_like(A_data)
+        max_activity_matrix[negative_mask] = A_data[negative_mask] * lb_new[A_indices[negative_mask]]
+        max_activity_matrix[positive_mask] = A_data[positive_mask] * ub_new[A_indices[positive_mask]]
+
+        # Recompute the total min activity for each constraint
+        max_activity_sums = np.add.reduceat(max_activity_matrix, A_indptr[:-1])
+
+        # Initialize array to store candidate lower bounds
+        candidate_lb = lb_new.copy()
+
+        # Single loop over all non-zero elements to calculate candidate lower bounds
+        for idx in range(len(A_data)):
+            # Determine the row index for the current non-zero element
+            row_idx = np.searchsorted(A_indptr, idx, side='right') - 1
+            var_idx = A_indices[idx]
+            coeff = A_data[idx]
+
+            # Calculate lb_numerator by excluding the current variable's contribution
+            lb_numerator = b[row_idx] - (max_activity_sums[row_idx] - max_activity_matrix[idx])
+
+            # Avoid division by zero
+            if coeff != 0:
+                temp_lb = lb_numerator / coeff
+
+                # Check if the candidate lower bound is valid
+                if (coeff > 0 and lb_numerator > 0): #and (coeff < 0 and lb_numerator < 0):
+                    if temp_lb > candidate_lb[var_idx]:
+                        candidate_lb[var_idx] = temp_lb
+
+        # Update lower bounds with the candidate lower bounds
+        lb_new = np.maximum(lb_new, candidate_lb)
+        #lb_new = lb.copy()
+        bound_trace['iteration'].append(iteration)
+        bound_trace['lb'].append(lb_new)
+        bound_trace['ub'].append(ub_new)
+        # ======== Step 3: Check for Convergence ========
+        # Calculate the maximum change in upper and lower bounds
+        if (np.allclose(ub_prev, ub_new, rtol=1e-6, atol=1e-6) and
+                np.allclose(lb_prev, lb_new, rtol=1e-6, atol=1e-6)):
+            print("Convergence achieved after", iteration, "iterations.")
+            converged = True
+            #print("Convergence achieved.")
+        # else:
+        print("Proceeding to next iteration: ", iteration)
+
+    # Save the updated bounds and model matrices
+    #save_json(A_sparse, b, c, lb_new, ub_new, of_sense, cons_sense, "model_matrices2.json", co, variable_names)
+    # convert the trace data in a json file
+    if save_path is not None:
+        trace_file = os.path.join(save_path, f"bound_trace_{iteration}.json")
+        # Convert the trace data numpy arrays to lists for JSON serialization
+        bound_trace['lb'] = [lb.tolist() for lb in bound_trace['lb']]
+        bound_trace['ub'] = [ub.tolist() for ub in bound_trace['ub']]
+        with open(trace_file, "w") as f:
+            json.dump(bound_trace, f, indent=4)
+    if not converged:
+        print(f"Warning: Maximum iterations ({max_iterations}) reached without full convergence.")
+
+    return A_sparse, b, c, co,  lb_new, ub_new, of_sense, cons_sense, variable_names

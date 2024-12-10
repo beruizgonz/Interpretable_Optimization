@@ -3,103 +3,175 @@ import gurobipy as gp
 from gurobipy import GRB
 
 from utils_models.utils_functions import *
+import gurobipy as gp
+from gurobipy import GRB
 
-
-def standard_form(original_model):
+def standard_form_e1(original_model):
     # Create a copy of the original model to work on
     model = original_model.copy()
-
+ 
     # Step 1: Ensure the model is in minimization form
     if model.ModelSense != GRB.MINIMIZE:
         print("Model sense is not minimization")
-        model.setObjective(-1 * model.getObjective(), GRB.MINIMIZE)
-
+        model.setObjective(-model.getObjective(), GRB.MINIMIZE)
+ 
     model.update()
-
+    var_new_dict = {}
+    new_vars = []
+    obj_expr = gp.LinExpr()
     # Step 2: Handle free variables (convert to two non-negative variables)
     for var in model.getVars():
-        if var.LB == float('-inf') and var.UB == float('inf'):
-            # Free variable, create two non-negative variables
-            var_pos = model.addVar(lb=0, vtype=var.VType, name=f"{var.VarName}_pos")
-            var_neg = model.addVar(lb=0, vtype=var.VType, name=f"{var.VarName}_neg")
-            model.update()
+        lb = var.LB
+        ub = var.UB
+        obj_coeff = var.Obj
+        vtype = var.VType
+        # Case 1: Variable is free (lb = -infinity, ub = infinity)
+        if lb == float('-inf') and ub == float('inf'):
+            # Decompose into two non-negative variables: var = var_pos - var_neg
+            var_pos = model.addVar(lb=0, ub=GRB.INFINITY, vtype=vtype, name=f"{var.VarName}_pos")
+            var_neg = model.addVar(lb=0, ub=GRB.INFINITY, vtype=vtype, name=f"{var.VarName}_neg")
+            var_new_dict[var] = (var_pos, var_neg)
+            new_vars.extend([var_pos, var_neg])
 
-            # Replace 'var' with 'var_pos - var_neg' in constraints
-            for constr in model.getConstrs():
-                coeff = model.getCoeff(constr, var)
-                if coeff != 0:
-                    model.chgCoeff(constr, var_pos, coeff)
-                    model.chgCoeff(constr, var_neg, -coeff)
-                    model.chgCoeff(constr, var, 0)  # Zero out the old variable
-
-            # Replace 'var' in the objective function
-            obj_coeff = var.getAttr(GRB.Attr.Obj)
+            # Adjust the objective function
             if obj_coeff != 0:
-                model.setObjective(model.getObjective() + obj_coeff * var_pos - obj_coeff * var_neg, GRB.MINIMIZE)
+                obj_expr.addTerms(obj_coeff, var_pos)
+                obj_expr.addTerms(-obj_coeff, var_neg)
 
-            # Remove the original variable from the model
-            model.remove(var)
+        # Case 2: Variable has lb = -infinity, ub finite
+        elif (lb == float('-inf')) and (ub < GRB.INFINITY):
+            # Represent var as var = ub - y, y >= 0
+            y = model.addVar(lb=0, ub=GRB.INFINITY, vtype=vtype, name=f"{var.VarName}_shifted")
+            var_new_dict[var] = y
+            new_vars.append(y)
+
+            # Adjust the objective function
+            if obj_coeff != 0:
+                obj_expr.addConstant(obj_coeff * ub)
+                obj_expr.addTerms(-obj_coeff, y)
+
+        # Case 3: Variable has finite lb, ub = infinity
+        elif lb > float('-inf') and ub == float('inf'):
+            # Shift variable to have lb = 0: var = y + lb
+            y = model.addVar(lb=0, ub=GRB.INFINITY, vtype=vtype, name=f"{var.VarName}_shifted")
+            var_new_dict[var] = y
+            new_vars.append(y)
+
+            # Adjust the objective function
+            if obj_coeff != 0:
+                obj_expr.addConstant(obj_coeff * lb)
+                obj_expr.addTerms(obj_coeff, y)
+
+        # Case 4: Variable has finite lb and ub
+        elif lb > float('-inf') and ub < GRB.INFINITY:
+            # Shift variable to have lb = 0: var = y + lb, y <= ub - lb
+            y = model.addVar(lb=0, ub=GRB.INFINITY, vtype=vtype, name=f"{var.VarName}_shifted")
+            var_new_dict[var] = y
+            new_vars.append(y)
+            # Add a constraint to enforce the upper bound
+            model.addConstr(y <= ub - lb, name=f"{var.VarName}_UB")
+            
+
+            # Adjust the objective function
+            if obj_coeff != 0:
+                obj_expr.addConstant(obj_coeff * lb)
+                obj_expr.addTerms(obj_coeff, y)
+        else:
+            # Should not reach here
+            raise ValueError(f"Unexpected variable bounds for variable {var.VarName}: LB={lb}, UB={ub}")
+        
+    # Add independent terms in the objective function
+    obj_expr.addConstant(model.getObjective().getConstant())
+
+
     model.update()
 
-    # Step 3: Handle finite bounds by creating new variables with lb=0
-    for var in model.getVars():
-        #if var.UB < float('inf') or var.LB < float('-inf'):
-            # Create a new variable with lb=0 and no upper bound
-            var_new = model.addVar(lb=0, vtype=var.VType, name=f"{var.VarName}_new")
-            model.update()
+    # Adjust constraints
+    for constr in model.getConstrs():
+        row = model.getRow(constr)
+        new_expr = gp.LinExpr()
+        constant_term = 0
 
-            # Replace 'var' in constraints with 'var_new'
-            for constr in model.getConstrs():
-                coeff = model.getCoeff(constr, var)
-                if coeff != 0:
-                    model.chgCoeff(constr, var_new, coeff)
-                    model.chgCoeff(constr, var, 0)  # Zero out the old variable
+        for idx in range(row.size()):
+            var = row.getVar(idx)
+            coeff = row.getCoeff(idx)
 
-            # Add constraints to enforce original bounds
-            if var.LB > -GRB.INFINITY and var.LB < 0:
-                if var.LB == var.UB and var.LB < 0:
-                    model.addConstr(var_new == -var.LB, name=f"{var.VarName}_LB")
+            if var in var_new_dict:
+                new_var = var_new_dict[var]
+                if isinstance(new_var, tuple):
+                    # var = var_pos - var_neg
+                    var_pos, var_neg = new_var
+                    new_expr.addTerms(coeff, var_pos)
+                    new_expr.addTerms(-coeff, var_neg)
+                elif var.LB == float('-inf') and var.UB < GRB.INFINITY:
+                    # var = ub - y
+                    y = new_var
+                    constant_term += coeff * var.UB
+                    new_expr.addTerms(-coeff, y)
+                elif var.LB > -GRB.INFINITY and var.UB == float('inf'):
+                    # var = y + lb
+                    y = new_var
+                    constant_term += coeff * var.LB
+                    new_expr.addTerms(coeff, y)
+                elif var.LB > -GRB.INFINITY and var.UB < GRB.INFINITY:
+                    # var = y + lb
+                    y = new_var
+                    constant_term += coeff * var.LB
+                    new_expr.addTerms(coeff, y)
                 else:
-                    model.addConstr(var_new >= var.LB, name=f"{var.VarName}_LB")
-            if var.LB > 0: 
-                model.addConstr(var_new >= var.LB, name=f"{var.VarName}_LB")
-            if var.UB < GRB.INFINITY:
-                if var.LB == var.UB and var.LB < 0:
-                    model.addConstr(var_new == -var.LB, name=f"{var.VarName}_LB")
-                else:
-                    model.addConstr(var_new <= var.UB, name=f"{var.VarName}_UB")
+                    raise ValueError("Unhandled variable case in constraints")
+            else:
+                new_expr.addTerms(coeff, var)
 
-            # Replace 'var' in the objective function
-            obj_coeff = var.getAttr(GRB.Attr.Obj)
-            if obj_coeff != 0:
-                model.setObjective(model.getObjective() + obj_coeff * var_new, GRB.MINIMIZE)
+        # Adjust the RHS of the constraint
+        sense = constr.Sense
+        rhs = constr.RHS
+        if constant_term != 0:
+            # Move constant term to RHS
+            rhs -= constant_term
 
-            # Remove the original variable from the model
-            model.remove(var)
+        # Replace the constraint with the new expression
+        model.remove(constr)
+        model.addConstr(new_expr, sense, rhs, name=constr.ConstrName)
+
+    model.update()
+
+    # Set the new objective function
+    #obj_expr.addConstant(model.getObjective().getConstant())
+    model.setObjective(obj_expr, GRB.MINIMIZE)
+
+    # Remove old variables
+    model.remove(list(var_new_dict.keys()))
+
+    # Update the model
     model.update()
 
     # Step 4: Transform all constraints into equalities by introducing slack/surplus variables
-    for constr in model.getConstrs():
-        sense = constr.Sense
-        if sense != GRB.EQUAL:
-            # Add slack or surplus variable based on constraint type
-            slack_var = model.addVar(lb=0, vtype=GRB.CONTINUOUS, name=f"slack_{constr.ConstrName}")
-            model.update()
+    ineq_constrs = [constr for constr in model.getConstrs() if constr.Sense != GRB.EQUAL]
 
-            # Add slack or surplus depending on the sense of the constraint
-            if sense == GRB.LESS_EQUAL:
-                model.chgCoeff(constr, slack_var, 1)
-            elif sense == GRB.GREATER_EQUAL:
-                model.chgCoeff(constr, slack_var, -1)
-
-            # Change the constraint's sense to equality after adding slack/surplus
-            constr.Sense = GRB.EQUAL
-
+    # Add slack/surplus variables for all inequality constraints
+    slack_vars = []
+    for constr in ineq_constrs:
+        # Print statement for debugging purposes (can be removed in production code)
+        #print(f"Constraint: {constr.ConstrName}, Sense: {constr.Sense}")
+        slack_var = model.addVar(lb=0, vtype=GRB.CONTINUOUS, name=f"slack_{constr.ConstrName}")
+        slack_vars.append((constr, slack_var))
+    
+    # Update the model once after adding all slack variables
     model.update()
-
+    
+    # Adjust constraints to include slack variables and change to equality
+    for constr, slack_var in slack_vars:
+        if constr.Sense == GRB.LESS_EQUAL:
+            model.chgCoeff(constr, slack_var, 1)
+        elif constr.Sense == GRB.GREATER_EQUAL:
+            model.chgCoeff(constr, slack_var, -1)
+        # Change the constraint's sense to equality
+        constr.Sense = GRB.EQUAL
+    
+    # Final model update
+    model.update()
     return model
-
-
 
 def standard_form1(originañ_model):
 
@@ -342,6 +414,8 @@ if __name__ == '__main__':
     GAMS_path = os.path.join(project_root, 'data/GAMS_library')
     GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
     model_path_modified = os.path.join(GAMS_path_modified, 'DINAM.mps')
+    model = gp.read(model_path_modified)
+    standard_model = standard_form_e1(model)
 
     # model.optimize()
     # print(model.objVal)

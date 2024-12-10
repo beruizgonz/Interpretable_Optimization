@@ -1,13 +1,13 @@
 import os 
 import gurobipy as gp
+import sys
 
 parent_dir = os.path.dirname(os.getcwd())
 sys.path.append(parent_dir)
 
-from models.opts import parse_opts
-from models.utils_models.presolvepsilon_class import PresolvepsilonOperations
-from models.utils_models.utils_functions import *
-from models.utils_models.standard_model import standard_form, construct_dual_model, standard_form2
+from utils_models.presolvepsilon_class import PresolvepsilonOperations
+from utils_models.utils_functions import *
+from utils_models.standard_model import standard_form, construct_dual_model, standard_form_e1
 
 
 def main_bounds(folder):
@@ -35,16 +35,15 @@ def main_bounds(folder):
             if model.Status == gp.GRB.OPTIMAL:
                 objective = model.objVal
                 print(f'Objective value of the original model: {model.objVal}')
-            standard_model = standard_form(model)
+            standard_model = standard_form_e1(model)
             standard_model.setParam('OutputFlag', 0)
             standard_model.optimize()
             #print(standard_model.objVal)
-            A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(standard_model)
-            save_json(A, b, c, lb, ub, of_sense, cons_senses,'model_matrices.json', co, variable_names)
+           
             # Uncomment these if you want to calculate bounds later
-     
-            # lb, ub = calculate_bounds2(standard_model)
-            bounds_model = build_model_from_json('model_matrices.json')
+        
+            A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names= calculate_bounds_candidates(standard_model, None)
+            bounds_model = build_model(A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names)
             bounds_model.setParam('OutputFlag', 0)
             bounds_model.optimize()
 
@@ -53,6 +52,7 @@ def main_bounds(folder):
             dual_model.optimize()
             if bounds_model.Status == gp.GRB.OPTIMAL:
                 objective_bounds = bounds_model.objVal
+                print(f'Objective value with bounds: {objective_bounds}')
 
             # # Check if the optimization status is optimal
             if standard_model.Status == gp.GRB.OPTIMAL:
@@ -90,6 +90,7 @@ def main_bounds(folder):
 
 
 project_root = os.path.dirname(os.getcwd())
+project_root = os.path.dirname(project_root)
 model_path = os.path.join(project_root, 'data/GAMS_library', 'INDUS.mps')
 GAMS_path = os.path.join(project_root, 'data/GAMS_library')
 GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
@@ -118,6 +119,7 @@ def standar():
 
 
 if __name__ == '__main__':
+    main_bounds(GAMS_path_modified)
     # # results = nested_dict()
     # # for model_name in os.listdir(GAMS_path):
     # #     model_path = os.path.join(GAMS_path, model_name)
