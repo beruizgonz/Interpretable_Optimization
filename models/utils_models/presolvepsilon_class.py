@@ -1,7 +1,7 @@
 import numpy as np
-from scipy.sparse import csr_matrix
+from scipy.sparse import csr_matrix, spdiags
 from utils_models.utils_functions import get_model_matrices, \
-    find_corresponding_negative_rows_with_indices, nested_dict, linear_dependency, normalize_features, \
+    find_corresponding_negative_rows_with_indices, nested_dict, normalize_features_sparse, normalize_features, \
     matrix_sparsification, calculate_bounds, build_dual_model_from_json, build_model_from_json, save_json, build_model
 from collections import defaultdict
 import warnings
@@ -71,7 +71,6 @@ class PresolvepsilonOperations:
         else:
             print("Using the model matrices")
             model_bounds = model
-          
         self.A, self.b, self.c, self.co, self.lb, self.ub, self.of_sense, self.cons_senses, self.variable_names = (
             get_model_matrices(model_bounds))
         ub = np.array(self.ub)
@@ -90,7 +89,7 @@ class PresolvepsilonOperations:
         self.load_model_matrices(model)
         if self.opts.operate_epsilon_rows:
             print("Eliminate zero rows operation")
-            self.eliminate_zero_rows_operation(epsilon = epsilon)
+            self.eliminate_zero_rows_operation_sparse(epsilon = epsilon)
         
         if self.opts.sparsification:
             print("Sparsification operation")
@@ -99,7 +98,7 @@ class PresolvepsilonOperations:
 
         if self.opts.operate_epsilon_cols:
             print("Eliminate zero columns operation")
-            self.eliminate_zero_columns_operation(epsilon = epsilon)
+            self.eliminate_zero_columns_operation_sparse(epsilon = epsilon)
         
         if self.opts.change_elements:
             print("Change elements operation")
@@ -135,7 +134,7 @@ class PresolvepsilonOperations:
         Perform sparsification operation on the model matrices.
         """
         A_norm = self.A.copy()
-        A_norm1, _, _ = normalize_features(A_norm, self.b)
+        A_norm1, _, _ = normalize_features_sparse(A_norm, self.b)
         self.ub = np.array(self.ub)
         # Covert the matrix to a CSR format
         A_norm = csr_matrix(self.A)
@@ -175,18 +174,21 @@ class PresolvepsilonOperations:
         # print('Model optimized: ', model.objVal)
 
     def eliminate_zero_rows_operation(self, epsilon):
-        original_A = self.A.A.copy()
         A_norm, b_norm, _ = normalize_features(self.A, self.b)
         num_rows, num_cols = A_norm.shape  
         rows_to_delete = []
         
         # Identify rows to be marked based on the norm criteria
         for i in range(num_rows):
+        # Extract the ith row as a sparse row
             row = A_norm.getrow(i)
-            row_norm = np.linalg.norm(row.toarray())
-            abs_coeff = np.abs(row.data)
             
-            if row_norm / abs(self.b[i]) < epsilon:
+            # Compute the norm of the row directly from its nonzero values
+            # row.data returns a 1D array of nonzero values in this row.
+            row_norm = np.sqrt(np.sum(row.data ** 2))
+            
+            # Check if the normalized row norm compared to b_norm[i] is below epsilon
+            if row_norm / abs(b_norm[i]) < epsilon:
                 rows_to_delete.append(i)
 
             # if np.all(abs_coeff / abs(b_norm[i]) < epsilon):
@@ -222,10 +224,60 @@ class PresolvepsilonOperations:
         zero_columns = np.where(self.A.getnnz(axis=0) == 0)[0]
         #zero_rows = np.where(~A_norm.any(axis=1))[0]
         print("Zero columns: ", len(zero_columns))
+
+    def eliminate_zero_rows_operation_sparse(self, epsilon):
+        """
+        Eliminates (sets to zero) rows in a sparse matrix A and vector b 
+        where the norm of the row is less than epsilon relative to the corresponding 
+        value in b.
+
+        Parameters:
+        epsilon (float): Threshold value to identify rows to zero out.
+
+        Returns:
+        None: The operation modifies self.A and self.b in place.
+        """
+        # Normalize features to obtain normalized A and b
+        A_norm, b_norm, _ = normalize_features_sparse(self.A.copy(), self.b.copy())
+        
+        # Ensure b is a 1D NumPy array
+        self.b = np.array(self.b)
+        
+        # Compute the sum of squares of each row (norm squared)
+        row_sums_of_squares = A_norm.power(2).sum(axis=1)
+
+        # Convert to 1D NumPy array
+        row_sums_of_squares = np.asarray(row_sums_of_squares).ravel()
+
+        # Compute the Euclidean norm for each row
+        row_norms = np.sqrt(row_sums_of_squares)
+
+        # Compute ratio of row_norm to the absolute value of b_norm
+        # Handle potential divide-by-zero issues
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ratio = np.where(b_norm != 0, row_norms / np.abs(b_norm), np.inf)
+
+        # Identify rows where ratio is less than epsilon
+        rows_to_delete = np.where(ratio < epsilon)[0].tolist()
+        
+        # Debugging information about rows being eliminated
+        print("Rows to delete: ", len(rows_to_delete))
+        if len(rows_to_delete) > 0:
+            # Create a mask to keep only the rows not in rows_to_delete
+            mask = np.ones(self.A.shape[0], dtype=bool)
+            mask[rows_to_delete] = False
+
+            # Create a sparse diagonal matrix to apply the mask
+            mask_diag = spdiags(mask.astype(int), 0, mask.size, mask.size)
+
+            # Apply the mask to zero out the rows in A
+            self.A = mask_diag.dot(self.A)
+
+            # Set the corresponding entries in b to zero
+            self.b[rows_to_delete] = 0
     
     def eliminate_zero_columns_operation(self, epsilon):
         # Copy the original matrix for reference
-        original_A = self.A.copy()
         
         # Normalize features if necessary (assuming normalize_features doesn't modify self.A in-place)
         A_norm, _, _ = normalize_features(self.A, self.b)
@@ -290,4 +342,76 @@ class PresolvepsilonOperations:
         # if hasattr(self, 'variable_bounds'):
         #     self.variable_bounds = [bound for idx, bound in enumerate(self.variable_bounds) if idx not in columns_to_delete]
 
+
+    def eliminate_zero_columns_operation_sparse(self, epsilon):
+        # Normalize features (A_norm is sparse)
+        A_norm, c_norm, _ = normalize_features_sparse(self.A.T.copy(), self.c.copy())
+        A_norm = self.A.copy()
+        num_rows, num_cols = A_norm.shape
+
+        # Compute the sum of squares for each column
+        # A_norm.power(2).sum(axis=0) efficiently computes column-wise sum of squares
+        col_sums_of_squares = A_norm.power(2).sum(axis=0)
+        col_sums_of_squares = np.asarray(col_sums_of_squares).ravel()
         
+        # Compute the Euclidean norm of each column
+        column_norms = np.sqrt(col_sums_of_squares)
+        self.c = np.array(self.c)
+        # Compute ratio similarly as done for rows, but now for columns.
+        # Assuming `self.c` is a vector of objective coefficients for each column.
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ratio_columns = np.where(np.abs(c_norm) != 0, column_norms / np.abs(c_norm), column_norms)
+
+        # Identify columns to zero out based on epsilon
+        columns_to_delete = np.where(ratio_columns < epsilon)[0]
+
+        # If you need to adjust constraint senses based on eliminated columns, do so before zeroing them out.
+        # For each row, check the sign of coefficients in the columns_to_delete.
+        # This still requires a loop over rows, but we can do it in a sparse-friendly way:
+        for row_index in range(num_rows):
+            # Extract this row as a sparse vector
+            row = self.A.getrow(row_index)
+            
+            # Extract coefficients in columns_to_delete
+            # To do this efficiently, select the required columns from the row
+            # E.g., sub_row = row[:, columns_to_delete]
+            # For large sets of columns_to_delete, a direct indexing might be costly, consider a more efficient approach if needed.
+            
+            # Here, let's simply get the nonzero pattern of the row and filter:
+            sub_indices = np.in1d(row.indices, columns_to_delete)  # indices within the row that correspond to columns_to_delete
+            sub_data = row.data[sub_indices]
+
+            if len(sub_data) == 0:
+                # No nonzero coefficients in these columns, no change in sense
+                continue
+
+            # Check sign pattern
+            if np.all(sub_data > 0):
+                self.cons_senses[row_index] = '<='
+            elif np.all(sub_data < 0):
+                self.cons_senses[row_index] = '>='
+            else:
+                # Mixed signs: Handle according to your logic. 
+                # Possibly no sense change or special handling here.
+                pass
+
+        # Now zero out the selected columns without removing them.
+        # Create a mask for columns
+        mask_cols = np.ones(num_cols, dtype=bool)
+        mask_cols[columns_to_delete] = False
+
+        # Create a sparse diagonal mask for columns
+        mask_diag_cols = spdiags(mask_cols.astype(int), 0, num_cols, num_cols)
+
+        # Multiply from the right to zero out selected columns
+        self.A = self.A.dot(mask_diag_cols)
+
+        # Update self.c if needed (e.g., zero out the objective coefficients for eliminated columns)
+        self.c[columns_to_delete] = 0
+
+        # Print information about zero columns
+        zero_columns_after = np.where(self.A.getnnz(axis=0) == 0)[0]
+        print("Zero columns after:", len(zero_columns_after))
+
+        # Optionally, record the columns that were zeroed out
+        self.change_dictionary["Eliminate Zero Columns"] = {"Columns": columns_to_delete.tolist()}

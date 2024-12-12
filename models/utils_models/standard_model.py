@@ -173,6 +173,101 @@ def standard_form_e1(original_model):
     model.update()
     return model
 
+def standard_form(original_model):
+    # Create a copy of the original model to work on
+    model = original_model.copy()
+
+    # Step 1: Ensure the model is in minimization form
+    if model.ModelSense != GRB.MINIMIZE:
+        print("Model sense is not minimization")
+        model.setObjective(-1 * model.getObjective(), GRB.MINIMIZE)
+
+    model.update()
+
+    # Step 2: Handle free variables (convert to two non-negative variables)
+    for var in model.getVars():
+        if var.LB == float('-inf') and var.UB == float('inf'):
+            # Free variable, create two non-negative variables
+            var_pos = model.addVar(lb=0, vtype=var.VType, name=f"{var.VarName}_pos")
+            var_neg = model.addVar(lb=0, vtype=var.VType, name=f"{var.VarName}_neg")
+            model.update()
+
+            # Replace 'var' with 'var_pos - var_neg' in constraints
+            for constr in model.getConstrs():
+                coeff = model.getCoeff(constr, var)
+                if coeff != 0:
+                    model.chgCoeff(constr, var_pos, coeff)
+                    model.chgCoeff(constr, var_neg, -coeff)
+                    model.chgCoeff(constr, var, 0)  # Zero out the old variable
+
+            # Replace 'var' in the objective function
+            obj_coeff = var.getAttr(GRB.Attr.Obj)
+            if obj_coeff != 0:
+                model.setObjective(model.getObjective() + obj_coeff * var_pos - obj_coeff * var_neg, GRB.MINIMIZE)
+
+            # Remove the original variable from the model
+            model.remove(var)
+    model.update()
+
+    # Step 3: Handle finite bounds by creating new variables with lb=0
+    for var in model.getVars():
+        #if var.UB < float('inf') or var.LB < float('-inf'):
+            # Create a new variable with lb=0 and no upper bound
+            var_new = model.addVar(lb=0, vtype=var.VType, name=f"{var.VarName}_new")
+            model.update()
+
+            # Replace 'var' in constraints with 'var_new'
+            for constr in model.getConstrs():
+                coeff = model.getCoeff(constr, var)
+                if coeff != 0:
+                    model.chgCoeff(constr, var_new, coeff)
+                    model.chgCoeff(constr, var, 0)  # Zero out the old variable
+
+            # Add constraints to enforce original bounds
+            if var.LB > -GRB.INFINITY and var.LB < 0:
+                if var.LB == var.UB and var.LB < 0:
+                    model.addConstr(var_new == -var.LB, name=f"{var.VarName}_LB")
+                else:
+                    model.addConstr(var_new >= var.LB, name=f"{var.VarName}_LB")
+            if var.LB > 0: 
+                model.addConstr(var_new >= var.LB, name=f"{var.VarName}_LB")
+            if var.UB < GRB.INFINITY:
+                if var.LB == var.UB and var.LB < 0:
+                    model.addConstr(var_new == -var.LB, name=f"{var.VarName}_LB")
+                else:
+                    model.addConstr(var_new <= var.UB, name=f"{var.VarName}_UB")
+
+            # Replace 'var' in the objective function
+            obj_coeff = var.getAttr(GRB.Attr.Obj)
+            if obj_coeff != 0:
+                model.setObjective(model.getObjective() + obj_coeff * var_new, GRB.MINIMIZE)
+
+            # Remove the original variable from the model
+            model.remove(var)
+    model.update()
+
+    # Step 4: Transform all constraints into equalities by introducing slack/surplus variables
+    for constr in model.getConstrs():
+        sense = constr.Sense
+        if sense != GRB.EQUAL:
+            # Add slack or surplus variable based on constraint type
+            slack_var = model.addVar(lb=0, vtype=GRB.CONTINUOUS, name=f"slack_{constr.ConstrName}")
+            model.update()
+
+            # Add slack or surplus depending on the sense of the constraint
+            if sense == GRB.LESS_EQUAL:
+                model.chgCoeff(constr, slack_var, 1)
+            elif sense == GRB.GREATER_EQUAL:
+                model.chgCoeff(constr, slack_var, -1)
+
+            # Change the constraint's sense to equality after adding slack/surplus
+            constr.Sense = GRB.EQUAL
+
+    model.update()
+
+    return model
+
+
 def standard_form1(originañ_model):
 
     model = originañ_model.copy()
@@ -404,6 +499,75 @@ def construct_dual_model(standard_model):
     # No need to call update() after addConstr in recent Gurobi versions
     dual_model.update()
     return dual_model
+
+
+import numpy as np
+from scipy.sparse import csr_matrix
+import gurobipy as gp
+from gurobipy import GRB
+
+def construct_dual_model_sparse(standard_model):
+    """
+    Constructs a dual model from a given standard primal model, supporting sparse matrices.
+
+    Args:
+        standard_model: The primal model object containing all required data.
+
+    Returns:
+        dual_model: The constructed dual Gurobi dual model.
+    """
+
+    # Extract primal model data
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(standard_model)
+
+    # Ensure A is a CSR sparse matrix
+    if not isinstance(A, csr_matrix):
+        A = csr_matrix(A)
+
+    # Convert b and c to arrays
+    b = np.array(b).flatten()
+    c = np.array(c).flatten()
+
+    # Number of constraints and variables from primal
+    num_constraints, num_variables = A.shape
+
+    # Initialize the dual model
+    dual_model = gp.Model('DualModel')
+    dual_model.setParam("OutputFlag", 0)  # Suppress output if desired
+
+    # Dual variables (y) correspond to primal constraints
+    # Dual variables are generally unrestricted, so lb = -∞
+    dual_vars = dual_model.addMVar(shape=num_constraints, lb=-GRB.INFINITY, name='y')
+
+    # Set the dual objective: b^T y + co
+    dual_obj = b @ dual_vars + co
+
+    # Determine dual objective sense and constraint direction
+    if of_sense == GRB.MINIMIZE:
+        # Primal minimization => Dual maximization
+        dual_obj_sense = GRB.MAXIMIZE
+        inequality_sense = '<='  # Dual constraints: A^T y >= c
+    # else:
+    #     # Primal maximization => Dual minimization
+    #     dual_obj_sense = GRB.MINIMIZE
+    #     inequality_sense = '<='  # Dual constraints: A^T y <= c
+
+    dual_model.setObjective(dual_obj, dual_obj_sense)
+
+    # Compute A^T once; this will define the rows of the dual constraints
+    A_transpose = A.transpose()
+
+    # Add all dual constraints at once
+    # Each dual constraint: (A^T y)_j {>= or <=} c_j
+    # A_transpose is (num_variables x num_constraints)
+    # dual_vars is (num_constraints x 1)
+    # Result: (A_transpose * dual_vars) is (num_variables x 1)
+    dual_model.addMConstr(A_transpose, dual_vars, inequality_sense, c, name='constraints')
+
+    return dual_model
+
+
+
 
 if __name__ == '__main__':   
 

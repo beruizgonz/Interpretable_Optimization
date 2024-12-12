@@ -31,11 +31,13 @@ project_root = os.path.dirname(os.getcwd())
 model_path = os.path.join(project_root, 'data/GAMS_library', 'DINAM.mps')
 GAMS_path = os.path.join(project_root, 'data/GAMS_library')
 real_data_path = os.path.join(project_root, 'data/real_data')
+bound_path = os.path.join(project_root, 'data/bounds_trace')
 
 GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
 model_path_modified = os.path.join(GAMS_path_modified, 'PDI.mps')
-real_model_path = os.path.join(real_data_path,  'openTEPES_EAPP_2030_sc01_st1.lp')
-trace_file = os.path.join(real_data_path)
+real_model_path = os.path.join(real_data_path,  'openTEPES_9n_2030_sc01_st1.lp')
+
+name = real_model_path.split('/')[-1].split('.')[0]
 # Coverting the model to standard form
 print(os.path.exists(model_path_modified))
 model = gp.read(real_model_path)
@@ -83,7 +85,7 @@ print('Model standard optimized: ', model_standard.objVal)
 # # # print('Upper bounds: ', ub)
 # # # #min_activity = min_activity.data
 #A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model_standard)
-A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names  = calculate_bounds_candidates(model_standard, trace_file, max_iterations=20)
+A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names  = calculate_bounds_candidates_sparse(model_standard, bound_path, name,  max_iterations=20)
 # print(len(lb_new), len(ub_new))
 # # #lb_new, ub_new = calculate_bounds_candidates(model_standard)
 #model_bounds = build_model_from_json('model_matrices.json')   
