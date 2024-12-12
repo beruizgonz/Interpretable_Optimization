@@ -20,7 +20,6 @@ import scipy
 
 from scipy.sparse import diags, csr_matrix, csc_matrix
 
-
 def nested_dict():
     """
     Create a nested defaultdict.
@@ -2624,3 +2623,42 @@ def calculate_bounds_candidates_sparse(model, save_path, name, max_iterations=10
 
     # Return updated model data
     return A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names
+
+
+def build_normalized_model(A_norm, b_norm, c, lb, ub, of_sense, cons_senses, var_names):
+    """
+    Builds a Gurobi model using the normalized A and b, and original c, lb, ub.
+    """
+    model = gp.Model()
+
+    # Set objective sense
+    model.ModelSense = of_sense  # 1 for minimization, -1 for maximization
+
+    # Add variables
+    num_vars = len(c)
+    variables = []
+    for i in range(num_vars):
+        var = model.addVar(lb=lb[i], ub=ub[i], obj=c[i], name=var_names[i])
+        variables.append(var)
+    model.update()
+
+    # Add constraints
+    num_constrs = len(b_norm)
+    for i in range(num_constrs):
+        expr = gp.LinExpr()
+        for j in range(num_vars):
+            if A_norm[i, j] != 0:
+                expr.add(variables[j], A_norm[i, j])
+        sense = cons_senses[i]
+        rhs = b_norm[i]
+        if sense == '<':
+            model.addConstr(expr <= rhs)
+        elif sense == '>':
+            model.addConstr(expr >= rhs)
+        elif sense == '=':
+            model.addConstr(expr == rhs)
+        else:
+            raise ValueError(f"Unknown constraint sense: {sense}")
+    model.update()
+
+    return model

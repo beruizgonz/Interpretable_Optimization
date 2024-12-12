@@ -26,7 +26,7 @@ opts = parse_opts()
 #opts.eliminate_zero_rows_epsilon = True
 
 
-#The path to the data
+# PATH TO THE DATA
 project_root = os.path.dirname(os.getcwd())
 model_path = os.path.join(project_root, 'data/GAMS_library', 'DINAM.mps')
 GAMS_path = os.path.join(project_root, 'data/GAMS_library')
