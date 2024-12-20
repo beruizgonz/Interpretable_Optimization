@@ -12,6 +12,8 @@ def parse_opts():
     parser.add_argument('--save_path',default = 'model.json', type = str, help = 'the path to save the model')
     parser.add_argument('--read_bounds',default = False, type = bool, help = 'read the bounds')
     parser.add_argument('--change_elements',default = False, type = bool, help = 'change the element')
-    parser.add_argument('--norm_abs',default = 'euclidean', type = bool, help = 'normalize the absolute value')
+    parser.add_argument('--norm_abs',default = 'euclidean', type = str, help = 'normalize the absolute value')
+    parser.add_argument('--local_solution', default = True, type = bool, help = 'calculate the local solution and use for the bounds')
+    parser.add_argument('--sparse', default = False, type = bool, help = 'use the sparsse presolve operations')
     args = parser.parse_args()
     return args 

@@ -173,8 +173,6 @@ def extract_gurobi_model_data(model):
     return A, b, c, co, lb, ub, of_sense, cons_senses, variable_names
 
 
-
-
 def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path, co=0, variable_names=None):
     """
     Save matrices and data structures as JSON files, including the sense of optimization and constraints.
@@ -2119,7 +2117,7 @@ def calculate_bounds(model):
     while not convergence:
         num_rows, num_cols = A_dense.shape
         min_activity_matrix = np.where(A_dense < 0, A_dense *ub, np.where(A_dense > 0, A_dense * lb, 0))
-        # 
+    
         # min_activity = np.where(A_dense < 0, ub, lb)
         ones = np.ones((num_cols, num_cols))  # Create a matrix of ones with the shape (num_cols, num_cols)
         np.fill_diagonal(ones, 0)  # Set the diagonal elements to 0
@@ -2545,8 +2543,6 @@ def calculate_bounds_candidates_sparse(model, save_path, name, max_iterations=10
         # Compute min_activity_sums per row
         # Using np.add.reduceat on the A_indptr boundaries
         min_activity_sums = np.add.reduceat(min_activity_matrix, A_indptr[:-1])
-
-
         # ub_numerators = b[row] - (min_activity_sum[row] - contribution_of_current_element)
         ub_numerators = b[row_indices] - (min_activity_sums[row_indices] - min_activity_matrix)
 
@@ -2662,3 +2658,33 @@ def build_normalized_model(A_norm, b_norm, c, lb, ub, of_sense, cons_senses, var
     model.update()
 
     return model
+
+def set_new_bounds(model, alpha_min, alpha_max):
+    """
+    Set new bounds for the variables in the model based on the optimal solution.
+    
+    Parameters:
+        model (gurobipy.Model): The optimization model to update.
+        alpha_min (float): Scaling factor for the lower bound (multiplier of the optimal value).
+        alpha_max (float): Scaling factor for the upper bound (multiplier of the optimal value).
+    """
+    model.setParam('OutputFlag', 0)
+    model.optimize()
+    try:
+        for var in model.getVars():
+            optimal_value = var.x  # Get the optimal value
+            if optimal_value is not None:
+                var.lb = optimal_value * alpha_min
+                var.ub = optimal_value * alpha_max
+
+        # Update the model to apply new bounds
+        model.update()
+        print("Variable bounds updated successfully.")
+
+    except gp.GurobiError as e:
+        print(f"Gurobi Error: {e.message}")
+    except Exception as e:
+        print(f"An error occurred: {str(e)}")
+    lower_bounds = [var.lb for var in model.getVars()]
+    upper_bounds = [var.ub for var in model.getVars()]
+    return lower_bounds, upper_bounds

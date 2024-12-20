@@ -29,18 +29,19 @@ def new_model1():
     model = Model("LP_Optimization")
 
     # Define variables
-    x1 = model.addVar(vtype=GRB.CONTINUOUS, lb=0, ub=1, name="x1")
-    x2 = model.addVar(vtype=GRB.CONTINUOUS, lb=0, ub=1, name="x2")
-    x3 = model.addVar(vtype=GRB.CONTINUOUS, lb=0, ub=1, name="x3")
-
+    x1 = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name="x1")
+    x2 = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name="x2")
+    x3 = model.addVar(vtype=GRB.CONTINUOUS, lb=0, name="x3")
+    
     # Set objective function
-    model.setObjective(1 * x1 + 5 * x2+ 6*x3 , GRB.MAXIMIZE)
+    model.setObjective(1* x1 + 5 * x2+ 6*x3 , GRB.MAXIMIZE)
 
     # Add constraints
-    model.addConstr(6 * x1 + 5 * x2 + 8 * x3 <= 16, "Constraint1")
+    model.addConstr(6* x1 + 5 * x2 + 8 * x3 <= 16, "Constraint1")
     model.addConstr(10 * x1 + 20 * x2 + 10 * x3 <= 35, "Constraint2")
 
     # Optimize model
+    model.setParam('OutputFlag', 0)
     model.optimize()
 
     # Display the results
@@ -76,3 +77,34 @@ def test_simplified_solution(model, simplified_model):
         obj_value += value * var.Obj
     print('Objective value using simplified solution:', obj_value)
     return obj_value
+
+def test_marginal_values_variables(model):
+    # Compute the marginal values for the variables
+    model.setParam('OutputFlag', 0)
+    model.optimize()
+    if model.status == GRB.OPTIMAL:
+        print("Optimal solution:")
+        for var in model.getVars():
+            print(f"{var.VarName}: {var.X} (Reduced cost: {var.RC})")
+        for constr in model.getConstrs():
+            print(f"{constr.ConstrName}: {constr.Pi} (Shadow price: {constr.Pi})")
+        # Get the value of the solution variables
+        x1 = model.getVarByName("x1")
+        new_x1_value = x1.x +1
+        # Evaluate the objective function at the new solution
+        model.addConstr(x1 == new_x1_value, name="adjust_x1")
+
+        # Re-optimize the model
+        model.optimize()
+
+        # Evaluate the objective function at the new solution
+        if model.status == GRB.OPTIMAL:
+            obj_value = model.getObjective().getValue()
+            print(f"Objective value at new solution: {obj_value}")
+
+    else:
+        print("No optimal solution found.")
+
+
+if __name__ == '__main__':
+    test_marginal_values_variables(new_model1())

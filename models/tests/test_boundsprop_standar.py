@@ -42,7 +42,7 @@ def main_bounds(folder):
            
             # Uncomment these if you want to calculate bounds later
         
-            A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names= calculate_bounds_candidates(standard_model, None)
+            A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names= calculate_bounds_candidates(standard_model, None, None)
             bounds_model = build_model(A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names)
             bounds_model.setParam('OutputFlag', 0)
             bounds_model.optimize()

@@ -29,7 +29,7 @@ save_path = os.path.join(results_folder, 'sparsification_optimal_solution')
 if not os.path.exists(save_path):
     os.makedirs(save_path)
 
-def set_new_bounds(file, alpha_min, alpha_max):
+def set_new_bounds(model, alpha_min, alpha_max):
     """
     Set new bounds for the variables in the model based on the optimal solution.
     
@@ -39,18 +39,18 @@ def set_new_bounds(file, alpha_min, alpha_max):
         alpha_max (float): Scaling factor for the upper bound (multiplier of the optimal value).
     """
     # Open the model
-    model = gp.read(file)
+    #model = gp.read(file)
     try:
-        # Solve the model to find the optimal solution
-        model = standard_form_e1(model)
-        model.setParam('OutputFlag', 0)
-        model.optimize()
+        # # Solve the model to find the optimal solution
+        # model = standard_form_e1(model)
+        # model.setParam('OutputFlag', 0)
+        # model.optimize()
 
-        if model.status != gp.GRB.OPTIMAL:
-            print("No optimal solution found. Bounds not updated.")
-            return
+        # if model.status != gp.GRB.OPTIMAL:
+        #     print("No optimal solution found. Bounds not updated.")
+        #     return
 
-        print("Optimal solution found. Updating variable bounds.")
+        # print("Optimal solution found. Updating variable bounds.")
 
         # Update bounds for each variable based on the optimal solution
         for var in model.getVars():
@@ -77,7 +77,7 @@ def set_new_bounds(file, alpha_min, alpha_max):
     upper_bounds = [var.ub for var in model.getVars()]
     bool_lower = all([np.isfinite(lb) for lb in lower_bounds])
     bool_upper = all([np.isfinite(ub) for ub in upper_bounds])
-    return model.objVal, bool_lower, bool_upper
+    return model.objVal, lower_bounds, upper_bounds
 
 def sparsification_bounds(file, save_path, alpha_min = 0.0001, alpha_max= 1000):
     results = nested_dict()

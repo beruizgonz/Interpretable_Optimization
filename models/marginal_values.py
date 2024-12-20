@@ -6,7 +6,6 @@ import matplotlib.pyplot as plt
 from gurobipy import GRB, Model
 
 from utils_models.utils_functions import *
-from utils_models.standard_model import standard_form1, construct_dual_model, standard_form
 from utils_models.utils_plots import pareto_analysis, plot_results
 
 
@@ -253,10 +252,15 @@ def importance_variables(model, variables, m_constraints):
     m_constraints = m_constraints.reshape(-1, 1)
     coeff = np.array([var.Obj for var in model.getVars()])
 
-    importance = np.abs(coeff + A_norm.T.dot(m_constraints).flatten())
-    importance = importance
+    importance = np.abs(coeff - A_norm.T.dot(m_constraints).flatten())
     return importance
 
+def test_marginal_variables(model): 
+    obj, m_variables, m_constraints = get_marginal_values(model)
+    # get the first m_variables
+    first_variables = m_variables[-2:-1]
+    first_variables_names = [var.VarName for var in model.getVars()][-2:-1]
+    print(first_variables)
     
 if __name__ == '__main__':
     for model_name in os.listdir(GAMS_path_modified):
@@ -268,19 +272,20 @@ if __name__ == '__main__':
         # marginal_values_constraints_histogram(model, name, save_path_variable)
         # marginal_values_variables_histogram(model, name, save_path_constraints)
         #model = gp.read(model_name)
-        thres, num, obj = main_marginal_values_handler(model, PERCENTILE_MIN_C, PERCENTILE_MAX_V, STEP_V, 'variables')
-        plot_results(thres, obj, num, name, save_simplyfied_variables, 'variables')
-        thres, num, obj = main_marginal_values_handler(model, PERCENTILE_MIN_C, PERCENTILE_MAX_C, STEP_C, 'constraints')
-        plot_results(thres, obj, num, name, save_simplyfied_constraints, 'constraints')
-        #c_values, c_constraints = get_values_constraints(model)
-        values_v, names_v = get_values_variables(model)
-        values_c, names_c = get_values_constraints(model)
-        importance_v = importance_variables(model, values_v, values_c)
-        pareto_analysis(save_pareto_variables_importance, f'{name}_importance', importance_v, names_v, 'Variables')
-        pareto_analysis(save_pareto_constraints, name, values_c, names_c, 'Constraints')
-        v_values, v_variables = get_values_variables(model)
-        pareto_analysis(save_pareto_variables, name, v_values, v_variables, 'Variables')
-    # # model = gp.read(model_path_modified)
+        # thres, num, obj = main_marginal_values_handler(model, PERCENTILE_MIN_C, PERCENTILE_MAX_V, STEP_V, 'variables')
+        # plot_results(thres, obj, num, name, save_simplyfied_variables, 'variables')
+        # thres, num, obj = main_marginal_values_handler(model, PERCENTILE_MIN_C, PERCENTILE_MAX_C, STEP_C, 'constraints')
+        # plot_results(thres, obj, num, name, save_simplyfied_constraints, 'constraints')
+        # #c_values, c_constraints = get_values_constraints(model)
+        # values_v, names_v = get_values_variables(model)
+        # values_c, names_c = get_values_constraints(model)
+        # importance_v = importance_variables(model, values_v, values_c)
+        # pareto_analysis(save_pareto_variables_importance, f'{name}_importance', importance_v, names_v, 'Variables')
+        # pareto_analysis(save_pareto_constraints, name, values_c, names_c, 'Constraints')
+        # v_values, v_variables = get_values_variables(model)
+        # pareto_analysis(save_pareto_variables, name, v_values, v_variables, 'Variables')
+    model = gp.read(model_path_modified)
+    test_marginal_variables(model)
     # # #pareto_analysis(model)
     # # thres, num, ob = main_marginal_values_variables(model, percentile_max, percentile_min, step)
     # # plot_results(thres, ob, num, 'AJAX', save_path_constraints, 'variables')
