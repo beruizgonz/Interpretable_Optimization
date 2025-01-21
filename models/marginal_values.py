@@ -7,7 +7,7 @@ from gurobipy import GRB, Model
 
 from utils_models.utils_functions import *
 from utils_models.utils_plots import pareto_analysis, plot_results
-
+from utils_models.standard_model import*
 
 # PATHS TO THE LOAD THE DATA
 project_root = os.path.dirname(os.getcwd())
@@ -54,7 +54,8 @@ def get_marginal_values(model):
     model.optimize()
     marginal_variables = list(model.getAttr('RC', model.getVars()))
     marginal_constraints = list(model.getAttr('Pi', model.getConstrs()))
-    return model.ObjVal, marginal_variables, marginal_constraints
+    variables = [var.X for var in model.getVars()]
+    return model.ObjVal, variables, marginal_variables, marginal_constraints
 
 def get_values_constraints(model):
     """
@@ -251,8 +252,8 @@ def importance_variables(model, variables, m_constraints):
     m_constraints = np.array(m_constraints)
     m_constraints = m_constraints.reshape(-1, 1)
     coeff = np.array([var.Obj for var in model.getVars()])
-
-    importance = np.abs(coeff - A_norm.T.dot(m_constraints).flatten())
+    c = np.array(c)
+    importance = np.abs(c - A.T.dot(m_constraints).flatten()) * variables
     return importance
 
 def test_marginal_variables(model): 
@@ -261,13 +262,27 @@ def test_marginal_variables(model):
     first_variables = m_variables[-2:-1]
     first_variables_names = [var.VarName for var in model.getVars()][-2:-1]
     print(first_variables)
-    
-if __name__ == '__main__':
-    for model_name in os.listdir(GAMS_path_modified):
 
-        model_path = os.path.join(GAMS_path_modified, model_name)
-        model = gp.read(model_path)
-        name = model_path.split('/')[-1].split('.')[0]
+def compared_importance_marginal_variables(model):
+    standard_model = standard_form_e1(model)
+    obj, m_variables, m_constraints = get_marginal_values(standard_model)
+    importance = importance_variables(standard_model, m_variables, m_constraints)
+    vbasis = standard_model.getAttr("VBasis")  # Get the basis status for all variables
+    basis_variables = np.where(np.array(vbasis) != 0)[0]  # Obtain the basis variables
+    # Obtain the importance of the basis variables
+    importance_basis = importance[basis_variables]
+    print(importance_basis)
+    m_variables = np.array(m_variables)
+    m_varialbes_basis = m_variables[basis_variables]
+    print(m_varialbes_basis)
+    
+
+if __name__ == '__main__':
+    # # for model_name in os.listdir(GAMS_path_modified):
+
+    # #     model_path = os.path.join(GAMS_path_modified, model_name)
+    # #     model = gp.read(model_path)
+    # #     name = model_path.split('/')[-1].split('.')[0]
 
         # marginal_values_constraints_histogram(model, name, save_path_variable)
         # marginal_values_variables_histogram(model, name, save_path_constraints)
@@ -285,7 +300,10 @@ if __name__ == '__main__':
         # v_values, v_variables = get_values_variables(model)
         # pareto_analysis(save_pareto_variables, name, v_values, v_variables, 'Variables')
     model = gp.read(model_path_modified)
-    test_marginal_variables(model)
+    obj, variables, m_variables, m_constraints = get_marginal_values(model)
+    importance = importance_variables(model, variables, m_constraints)
+    print(importance)
+    # compared_importance_marginal_variables(model)
     # # #pareto_analysis(model)
     # # thres, num, ob = main_marginal_values_variables(model, percentile_max, percentile_min, step)
     # # plot_results(thres, ob, num, 'AJAX', save_path_constraints, 'variables')

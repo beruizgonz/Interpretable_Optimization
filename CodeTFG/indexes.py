@@ -8,15 +8,15 @@ def optimality_index(model, data):
         if model in data:
             modelo_datos = data[model]
             modelo_primal = modelo_datos.get('primal', {})
-            modelo_dual = modelo_datos.get('dual', {})
-            modelo_pr_eps = modelo_primal.get('epsilon', [])
+            # modelo_dual = modelo_datos.get('dual', {})
+            # modelo_pr_eps = modelo_primal.get('epsilon', [])
             modelo_pr_of = modelo_primal.get('objective_function', [])
-            modelo_pr_dv = modelo_primal.get('decision_variables', [])
-            modelo_pr_ci = modelo_primal.get('changed_indices', [])
-            modelo_pr_cv = modelo_primal.get('constraint_violation', [])
+            # modelo_pr_dv = modelo_primal.get('decision_variables', [])
+            # modelo_pr_ci = modelo_primal.get('changed_indices', [])
+            # modelo_pr_cv = modelo_primal.get('constraint_violation', [])
             modelo_pr_ofod = modelo_primal.get('of_original_decision', [])
-            modelo_pr_time = modelo_primal.get('execution_time', [])
-            modelo_du_dv = modelo_dual.get('decision_variables', []) 
+            # modelo_pr_time = modelo_primal.get('execution_time', [])
+            # modelo_du_dv = modelo_dual.get('decision_variables', []) 
 
         # Cálculo de degradación de la función objetivo original
         divisor = modelo_pr_of[0] if modelo_pr_of else None
@@ -38,20 +38,20 @@ def infeasibility_index(model, data):
         modelo_datos = data[model]
         modelo_primal = modelo_datos.get('primal', {})
         modelo_dual = modelo_datos.get('dual', {})
-        modelo_pr_eps = modelo_primal.get('epsilon', [])
-        modelo_pr_of = modelo_primal.get('objective_function', [])
-        modelo_pr_dv = modelo_primal.get('decision_variables', [])
-        modelo_pr_ci = modelo_primal.get('changed_indices', [])
+        # modelo_pr_eps = modelo_primal.get('epsilon', [])
+        # modelo_pr_of = modelo_primal.get('objective_function', [])
+        # modelo_pr_dv = modelo_primal.get('decision_variables', [])
+        # modelo_pr_ci = modelo_primal.get('changed_indices', [])
         modelo_pr_cv = modelo_primal.get('constraint_violation', [])
         modelo_pr_ofod = modelo_primal.get('of_original_decision', [])
-        modelo_pr_time = modelo_primal.get('execution_time', [])
+        #modelo_pr_time = modelo_primal.get('execution_time', [])
         modelo_du_dv = modelo_dual.get('decision_variables', []) 
     
     cifra_referencia = 1e-6
     modelo_pr_cv_sin_nan = remove_nan_sublists(modelo_pr_cv)
     modelo_pr_cv_filtrado = set_values_below_threshold_to_zero(modelo_pr_cv_sin_nan, cifra_referencia)
     modelo_du_dv = [modelo_du_dv]
-    producto_cv_vd = multiply_matrices(modelo_pr_cv_filtrado, modelo_du_dv)
+    producto_cv_vd = multiply_matrices1(modelo_pr_cv_filtrado, modelo_du_dv)
     suma_producto = sum_sublists(producto_cv_vd)
     infeasiblity_index = [abs(x) / abs(modelo_pr_ofod[0]) for x in suma_producto]
 
@@ -62,13 +62,13 @@ def complexity_index(model, data):
         modelo_datos = data[model]
         modelo_primal = modelo_datos.get('primal', {})
         modelo_dual = modelo_datos.get('dual', {})
-        modelo_pr_eps = modelo_primal.get('epsilon', [])
-        modelo_pr_of = modelo_primal.get('objective_function', [])
+        # modelo_pr_eps = modelo_primal.get('epsilon', [])
+        # modelo_pr_of = modelo_primal.get('objective_function', [])
         modelo_pr_dv = modelo_primal.get('decision_variables', [])
         modelo_pr_ci = modelo_primal.get('changed_indices', [])
         modelo_pr_cv = modelo_primal.get('constraint_violation', [])
-        modelo_pr_ofod = modelo_primal.get('of_original_decision', [])
-        modelo_pr_time = modelo_primal.get('execution_time', [])
+        # modelo_pr_ofod = modelo_primal.get('of_original_decision', [])
+        # modelo_pr_time = modelo_primal.get('execution_time', [])
         modelo_du_dv = modelo_dual.get('decision_variables', []) 
         rows_pr_changed = modelo_primal.get('rows_changed', [])
         columns_pr_changed = modelo_primal.get('columns_changed', [])
@@ -135,6 +135,80 @@ def complexity_index(model, data):
     
     # suma_objfunc_unfeasiblity = [a + b for a, b in zip(modelo_pr_ofod_pu, infeasiblity_index)]
     return [complexity_index1, rows, columns]
+
+from scipy.sparse import lil_matrix, csr_matrix
+import numpy as np
+
+def complexity_index_sparse(model, data):
+    if model in data:
+        modelo_datos = data[model]
+        modelo_primal = modelo_datos.get('primal', {})
+        modelo_dual = modelo_datos.get('dual', {})
+        modelo_pr_dv = modelo_primal.get('decision_variables', [])
+        modelo_pr_ci = modelo_primal.get('changed_indices', [])
+        modelo_pr_cv = modelo_primal.get('constraint_violation', [])
+        modelo_du_dv = modelo_dual.get('decision_variables', []) 
+        rows_pr_changed = modelo_primal.get('rows_changed', [])
+        columns_pr_changed = modelo_primal.get('columns_changed', [])
+        total_non_zeros = modelo_primal.get('non_zeros', [])
+
+    modelo_pr_cv_medias = calculate_means(modelo_pr_cv)
+
+    constraints = len(modelo_pr_cv[0])
+    variables = len(modelo_pr_dv[0])
+    total_elements_A = total_non_zeros
+
+    # Construct the sparse matrix A
+    A_matrix = lil_matrix((constraints, variables), dtype=int)  # Use LIL format for efficient row/column updates
+
+    # Fill the sparse matrix A with indices set to 1
+    complexity_index1 = []
+    rows = []
+    columns = []
+    for i in modelo_pr_ci:
+        if i:  # Check if 'i' is not empty or None
+            for j in i:
+                A_matrix[j[0], j[1]] = 1  # Set the appropriate element to 1
+
+        # Convert to CSR format for efficient computations
+        A_matrix_csr = csr_matrix(A_matrix)
+
+        # Calculate complexity metrics for the matrix
+        counts_ones = A_matrix_csr.nnz  # Total non-zero elements
+        # counts_ones_rows = np.sum(np.all(A_matrix_csr.toarray(), axis=1))  # Rows with all ones
+        # counts_ones_columns = np.sum(np.all(A_matrix_csr.toarray(), axis=0))  # Columns with all ones
+
+        # Append complexity index
+        complexity_index1.append(1 - counts_ones / total_elements_A)
+
+    # Process row complexities
+    for row in rows_pr_changed:
+        if not row:  # Check for None or empty list
+            complexity_rows = 1
+        else:
+            print('Row:', len(row))
+            complexity_rows = 1 - len(row) / constraints
+        rows.append(complexity_rows)
+
+    # Process column complexities
+    for col in columns_pr_changed:
+        if not col:  # Check for None or empty list
+            complexity_columns = 1
+        else:
+            print('Column:', len(col))
+            complexity_columns = 1 - len(col) / variables
+        columns.append(complexity_columns)
+
+    # Calculate accumulated indices changed to 0 in matrix A
+    acumulado_modelo_ci = calculate_lengths(modelo_pr_ci)
+    elementos_A_totales = len(modelo_pr_dv) * len(modelo_du_dv)
+
+    # Calculate the fraction of elements set to 0 for each level of epsilon
+    elementos_A_que_se_hacen_0_pu = [x / elementos_A_totales for x in acumulado_modelo_ci]
+    complexity_index = [1 - x for x in elementos_A_que_se_hacen_0_pu]
+
+    return [complexity_index1, rows, columns]
+
 
 def execution_time_index(model, data):
     if model in data:

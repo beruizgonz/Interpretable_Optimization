@@ -1,6 +1,7 @@
 from matplotlib import pyplot as plt
 import numpy as np
 import os
+from scipy.sparse import csr_matrix
 
 # Function to calculate the media of a list.
 def calculate_means(lst):
@@ -72,6 +73,28 @@ def multiply_matrices(A, B):
                 C[i][j] = A[i][j] * B[0][j]
     return C
 
+def multiply_matrices1(A, B):
+    """
+    Multiply two matrices A and B.
+    """
+    # Convert the inputs to NumPy arrays for efficient operations
+    A = np.array(A)
+    B = np.array(B).reshape(-1, 1)
+    print(A.shape)
+    print(B.shape)
+    # Check if the matrices are compatible for multiplication
+    if A.shape[1] != B.shape[0]:
+        raise ValueError("The matrices cannot be multiplied: incompatible dimensions.")
+    
+    # Perform the matrix multiplication
+    A = csr_matrix(A)
+    B = csr_matrix(B)
+    C = A.dot(B)
+    # Convert to a list of lists before returning
+    C = C.toarray().tolist()
+    return C
+
+
 def sum_sublists(list_of_lists):
     return [sum(map(float, sublist)) for sublist in list_of_lists]
 
@@ -104,7 +127,7 @@ def plot1(model_pr_epsilon, vector1, title, name1):
     plt.show()
 
 
-def plot_subplots(folder, model_name, vector_epsilon, vector1, vector2, vector3, name1, name2, name3):
+def plot_subplots(folder, model_name, vector_epsilon, vector1, vector2, vector3, name1, name2, name3, operation):
     # Determine the maximum length of the vectors
     max_length = max(len(vector_epsilon), len(vector1), len(vector2), len(vector3[0]))
 
@@ -151,7 +174,7 @@ def plot_subplots(folder, model_name, vector_epsilon, vector1, vector2, vector3,
     axs[2].grid(True)
 
         # Set a title for the entire plot
-    fig.suptitle(f'Sparsification indexes for {model_name} problem', fontsize=16)
+    fig.suptitle(f'{operation} indexes for {model_name} problem', fontsize=16)
     save_path = os.path.join(folder, f'zero_epsilon_{model_name}.png')
     plt.savefig(save_path)
     plt.close()

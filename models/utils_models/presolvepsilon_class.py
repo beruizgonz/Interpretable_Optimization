@@ -10,6 +10,7 @@ from datetime import datetime
 import logging
 import os 
 from scipy.sparse import coo_matrix, csr_matrix, lil_matrix
+from scipy.linalg import qr
 
 # logging.basicConfig()
 # log = logging.getLogger(__name__)
@@ -86,6 +87,10 @@ class PresolvepsilonOperations:
             print("Sparsification operation")
             self.sparsification_operation(epsilon = epsilon)
         
+        if self.opts.dependency_rows:
+            print("Linear dependency rows")
+            self.find_basis(epsilon = epsilon)
+        
         return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
                 self.change_dictionary, self.operation_table)  
     
@@ -106,7 +111,7 @@ class PresolvepsilonOperations:
         A_modifiable = A_dense.copy()
         max_sparsification = np.where(A_norm1 < 0, A_norm1* self.ub, np.where(A_norm1 > 0, A_norm1 * self.lb, 0))
         ones = np.ones((A_dense.shape[1], A_dense.shape[1]))
-        #np.fill_diagonal(ones, 0)
+        np.fill_diagonal(ones, 0)
         max_activity_variable = max_sparsification @ ones
         upper_bound_matrix = A_norm1* self.ub
         #upper_bound_matrix = np.where(A_norm1 < 0, A_norm1 * self.lb, np.where(A_norm1 > 0, A_norm1 * self.ub, 0)) # tiene sentido???
@@ -119,6 +124,8 @@ class PresolvepsilonOperations:
 
         indices = np.where(epsilon_matrix < epsilon)
         A_modifiable[indices] = 0
+        zero_rows = np.where(np.all(A_modifiable == 0, axis=1))[0]  
+        print("Zero rows: ", len(zero_rows))
         self.A = csr_matrix(A_modifiable)   
 
     def eliminate_zero_rows_operation(self, epsilon, norm_abs='euclidean'):
@@ -231,6 +238,99 @@ class PresolvepsilonOperations:
         # Record the columns that were zeroed out
         self.change_dictionary["Eliminate Zero Columns"] = {"Columns": columns_to_delete}
 
+    def linear_dependency_rows(self, epsilon): 
+        basis_rows = []
+        index_row = []
+        # the new A is A with the colum of b
+        self.b = np.array(self.b)   
+        self.A = self.A.toarray()
+        new_A = np.vstack((self.A.T, self.b.reshape(1,-1)))
+        new_A = new_A.T
+        for i, fila in enumerate(new_A):
+            if len(basis_rows) == 0:
+                basis_rows.append(fila)
+                index_row.append(i)
+            else:
+                # Crear una matriz con las filas base actuales como columnas
+                base_matrix = np.vstack(basis_rows).T  # Cada columna es una fila base
+                try:
+                    # Resolver el sistema base_matrix * coef = fila
+                    coeficientes, residuals, rango, _ = np.linalg.lstsq(base_matrix, fila, rcond=None)
+                    if residuals.size > 0:
+                        residual_norm = np.sqrt(residuals[0])
+                    else:
+                        # Calcular la norma del residual manualmente si residuals está vacío
+                        residual = fila - base_matrix @ coeficientes
+                        residual_norm = np.linalg.norm(residual)
+                    # Si la norma del residual es mayor que la tolerancia, agregar la fila a la base
+                    if residual_norm > epsilon:
+                        basis_rows.append(fila)
+                        index_row.append(i)
+                except np.linalg.LinAlgError:
+                    basis_rows.append(fila)
+                    index_row.append(i)
+        # The rows that are not in the basis put there coeeficients to zero
+        print(len(index_row))   
+        for i in range(len(self.A)):
+            if i not in index_row:
+                self.A[i] = 0
+                self.b[i] = 0
+        self.A = csr_matrix(self.A) 
+        self.change_dictionary["Linear Dependency Rows"]["Rows"] = index_row     
+
+    def find_basis(self, epsilon=1e-2):     
+
+        self.b = np.array(self.b)   
+        self.A = self.A.toarray()
+        new_A = np.vstack((self.A.T, self.b.reshape(1,-1)))
+        new_A = new_A.T
+        Q, R, P = qr(new_A.T, pivoting=True)  # shape of R: (n_rows, n_rows)
+
+        # The diagonal entries of R correspond to the pivoted columns in Q.
+        # In the row sense, we check how many of those are above epsilon.
+        diag_R = np.abs(np.diag(R))
+        rank = np.sum(diag_R > epsilon)
+
+        # The first `rank` elements in P are the indices of the linearly independent rows.
+        pivot_rows = P[:rank]
+
+        # Zero out the rows that are not pivot rows
+        # (This is analogous to what you do in your code.)
+        # Make a copy or modify in place as needed
+        A_out = self.A.copy()
+        b_out = self.b.copy()
+        for i in range(A_out.shape[0]):
+            if i not in pivot_rows:
+                A_out[i, :] = 0
+                b_out[i] = 0
+
+        # Convert back to sparse if needed
+        A_out_csr = csr_matrix(A_out)
+
+        self.A = A_out_csr
+        self.b = b_out
+
+    def find_basis_columns(self, epsilon): 
+        Q, R, P = qr(self.A, pivoting=True)  # shape of R: (n_rows, n_rows)
+
+        # The diagonal entries of R correspond to the pivoted columns in Q.
+        # In the row sense, we check how many of those are above epsilon.
+        diag_R = np.abs(np.diag(R))
+        rank = np.sum(diag_R > epsilon)
+
+        # The first `rank` elements in P are the indices of the linearly independent rows.
+        pivot_rows = P[:rank]
+
+        A_out = self.A.copy()
+
+        for i in range(A_out.shape[0]):
+            if i not in pivot_rows:
+                A_out[:,i] = 0
+
+        # Convert back to sparse if needed
+        A_out_csr = csr_matrix(A_out)
+
+        self.A = A_out_csr
 
 
 class PresolvepsilonOperationsSparse:
@@ -318,12 +418,13 @@ class PresolvepsilonOperationsSparse:
         Returns:
             None: Updates `self.A` in-place as a sparse CSR matrix.
         """
-        A_norm1, _, _ = normalize_features_sparse(self.A.copy(), self.b.copy())
+        A_norm1, b_norm,  _ = normalize_features_sparse(self.A.copy(), self.b.copy())
         ub = np.array(self.ub)  # Upper bounds
         lb = np.array(self.lb)  # Lower bounds
 
+        b_norm = np.array(b_norm)
         A_norm = csr_matrix(self.A).copy()  # Sparse matrix in CSR format
-        print("Non-zero elements in A_norm: ", A_norm.nnz)
+        #print("Non-zero elements in A_norm: ", A_norm.nonzero())
 
         max_sparsification = A_norm1.copy()
         data = max_sparsification.data
@@ -333,6 +434,7 @@ class PresolvepsilonOperationsSparse:
         # Handle upper and lower bounds on non-zero elements
         neg_mask = data < 0  # Mask for negative values
         pos_mask = data > 0  # Mask for positive values
+
 
         max_activity_data = np.zeros_like(data)
         max_activity_data[neg_mask] = data[neg_mask] * ub[A_indices[neg_mask]]
@@ -345,8 +447,8 @@ class PresolvepsilonOperationsSparse:
         adjusted_data = row_sums[row_indices] - max_activity_data
         delayed_sparsification = csr_matrix((adjusted_data, A_indices, A_indptr), shape=max_sparsification.shape)
         # upper_bound_matrix = A_norm1.copy()  # Copy the structure of A_norm
-        # upper_bound_matrix.data[neg_mask.data] *= lb[A_norm1.indices[neg_mask.data]]  # Multiply negative entries by lb
-        # upper_bound_matrix.data[pos_mask.data] *= ub[A_norm1.indices[pos_mask.data]] # Multiply positive entries by ub. This two lines define a variable to be in its maximum value  
+        # upper_bound_matrix.data[neg_mask] *= lb[A_norm.indices[neg_mask]]  # Multiply negative entries by lb
+        # upper_bound_matrix.data[pos_mask] *= ub[A_norm.indices[pos_mask]] # Multiply positive entries by ub. This two lines define a variable to be in its maximum value  
         #print(max_activity_variable.toarray()) 
         upper_bound_matrix = A_norm1.multiply(ub)
         upper_bound_matrix = upper_bound_matrix.tocsr()  # Ensure CSR format for consistent indexing
@@ -361,9 +463,13 @@ class PresolvepsilonOperationsSparse:
             )
         condition = epsilon_matrix < epsilon
         A_norm.data[condition] = 0
+        A_norm.eliminate_zeros()
+        # Get the rows where all the elements are zero
+        # Convert to array to avoid issues with sparse matrices
+        zero_rows_sparse = np.where(A_norm.getnnz(axis=1) == 0)[0]
+        print("Zero rows: ", len(zero_rows_sparse))
         self.A = A_norm
-
-
+        
 
     def eliminate_zero_rows_operation_sparse(self, epsilon, norm_abs='euclidean'):
         """
@@ -426,9 +532,9 @@ class PresolvepsilonOperationsSparse:
         #A_norm, c_norm, _ = normalize_features_sparse(self.A.T.copy(), self.c.copy())
         A_norm = self.A.copy()
         c_norm = self.c.copy()  
-        self.c = np.array(self.c)
+        self.c = np.array(c_norm)
         num_rows, num_cols = self.A.shape
-        print("Number of rows: ", num_cols)
+        print("Number of columns: ", num_cols)
         # Compute norms based on the specified method
         if norm_abs == 'euclidean':
             col_sums_of_squares = A_norm.power(2).sum(axis=0)
@@ -436,6 +542,7 @@ class PresolvepsilonOperationsSparse:
             print(len(np.where(column_norms < 1)[0]))
         elif norm_abs == 'abs':
             column_norms = abs(A_norm).max(axis=0).toarray().flatten()
+            print(len(np.where(column_norms < 1)[0]))   
         else:
             raise ValueError("Invalid norm_abs value. Use 'euclidean' or 'abs'.")
 
@@ -443,6 +550,7 @@ class PresolvepsilonOperationsSparse:
         with np.errstate(divide='ignore', invalid='ignore'):
             ratio_columns = np.where(np.abs(c_norm) != 0, column_norms /np.abs(c_norm), column_norms)
 
+        print("Ratio columns: ", len(np.where(ratio_columns < epsilon)[0])) 
         # Identify columns to delete
         columns_to_delete = np.where(ratio_columns < epsilon)[0]
         # Adjust constraint senses based on eliminated columns

@@ -5,17 +5,18 @@ from statistics import *
 from indexes import *
 
 
-def sensitivity_analysis(folder, modelo, datos):
+def sensitivity_analysis(folder, modelo, datos, operation='Sparsification'):
     if modelo in datos:
         modelo_datos = datos[modelo]
         modelo_primal = modelo_datos.get('primal', {})
         modelo_pr_eps = modelo_primal.get('epsilon', [])
 
     optimaility = optimality_index(modelo, datos)
+    print('Optimality')
     infeasibility = infeasibility_index(modelo, datos)
-    complexity = complexity_index(modelo, datos)
-
-    plot_subplots(folder, modelo, modelo_pr_eps, optimaility, infeasibility, complexity, 'Optimality Index', 'Infeasibility Index', 'Complexity Index')
+    print('Infeasibility')
+    complexity = complexity_index_sparse(modelo, datos)
+    plot_subplots(folder, modelo, modelo_pr_eps, optimaility, infeasibility, complexity, 'Optimality Index', 'Infeasibility Index', 'Complexity Index', operation)
     return
 
 
@@ -166,15 +167,19 @@ if __name__ == '__main__':
     # # global_sensitivity_analysis(modelos_tipo1, data)
     # sensitivity_analysis('AIRSP', data)
     project_root = os.path.dirname(os.getcwd())
-    figures_folder = os.path.join(project_root, 'figures_new/local/not_sparse')
-    figures_rows_folder = os.path.join(figures_folder, 'epsilon_rows_abs')
-    figures_cols_folder = os.path.join(figures_folder,'epsilon_cols_abs')
-    figures_sparsification = os.path.join(figures_folder, 'sparsification_maximum')
+    figures_folder = os.path.join(project_root, 'figures_new/global/sparse/real_problems')
+    figures_rows_folder = os.path.join(figures_folder, 'epsilon_rows_norm')
+    figures_cols_folder = os.path.join(figures_folder,'epsilon_cols_norm')
+    figures_sparsification = os.path.join(figures_folder, 'sparsification')
+    figures_dependency_rows = os.path.join(figures_folder, 'epsilon_dependency_rows')
+    figures_dependency_cols = os.path.join(figures_folder, 'epsilon_dependency_cols')
 
-    results_foder = os.path.join(project_root, 'results_new/local/not_sparse')
-    results_sparsification_folder = os.path.join(results_foder, 'sparsification_maximum')
-    results_rows_folder = os.path.join(results_foder, 'epsilon_rows_abs')
-    results_cols_folder = os.path.join(results_foder, 'epsilon_cols_abs')
+    results_foder = os.path.join(project_root, 'results_new/global/sparse/real_problems')
+    results_sparsification_folder = os.path.join(results_foder, 'sparsification')
+    results_rows_folder = os.path.join(results_foder, 'epsilon_rows_norm')
+    results_cols_folder = os.path.join(results_foder, 'epsilon_cols_norm')
+    results_dependency_rows_folder = os.path.join(results_foder, 'epsilon_dependency_rows')
+    results_dependency_cols_folder = os.path.join(results_foder, 'epsilon_dependency_cols')
 
     optimun_bounds_folder = os.path.join(results_foder, 'sparsification_optimum_bounds')
     figures_optimum_bounds = os.path.join(project_root, 'figures/sparsification_optimum_bounds')
@@ -187,29 +192,44 @@ if __name__ == '__main__':
     # with open(json_path, 'r') as f:
     #     data = json.load(f)
     # sensitivity_analysis(figures_sparsification, model, data)
-    for root, dirs, files in os.walk(results_sparsification_folder):
-        for file in files:
-            if file.endswith('.json'):
-                print(f"Processing file {file}")
-                if 'MARCO' in file:
-                    continue
-                else:
-                    with open(os.path.join(root, file), 'r') as f:
-                        data = json.load(f)
-                        for model in data.keys():  
-                            sensitivity_analysis(figures_sparsification, model, data)
-    for root, dirs, files in os.walk(results_rows_folder):
-        for file in files:
-            if file.endswith('.json'):
-                print(f"Processing file {file}")
-                if 'MARCO' in file:
-                    continue
-                else:
-                    with open(os.path.join(root, file), 'r') as f:
-                        data = json.load(f)
-                        for model in data.keys():  
-                            sensitivity_analysis(figures_rows_folder, model, data)
+    # for root, dirs, files in os.walk(results_sparsification_folder):
+    #     operation = 'Sparsification'
+    #     for file in files:
+    #         if file.endswith('.json'):
+    #             print(f"Processing file {file}")
+    #             if 'MARCO' in file:
+    #                 continue
+    #             else:
+    #                 with open(os.path.join(root, file), 'r') as f:
+    #                     data = json.load(f)
+    #                     for model in data.keys():  
+    #                         sensitivity_analysis(figures_sparsification, model, data,operation)
+    # for root, dirs, files in os.walk(results_dependency_rows_folder):
+    #     operation = 'Dependency Rows'
+    #     for file in files:
+    #         if file.endswith('.json'):
+    #             print(f"Processing file {file}")
+    #             if 'MARCO' in file:
+    #                 continue
+    #             else:
+    #                 with open(os.path.join(root, file), 'r') as f:
+    #                     data = json.load(f)
+    #                     for model in data.keys():  
+    #                         sensitivity_analysis(figures_dependency_rows, model, data, operation)
+    # for root, dirs, files in os.walk(results_dependency_cols_folder):
+    #     operation = 'Dependency Cols'
+    #     for file in files:
+    #         if file.endswith('.json'):
+    #             print(f"Processing file {file}")
+    #             if 'MARCO' in file:
+    #                 continue
+    #             else:
+    #                 with open(os.path.join(root, file), 'r') as f:
+    #                     data = json.load(f)
+    #                     for model in data.keys():  
+    #                         sensitivity_analysis(figures_dependency_cols, model, data, operation)
     for root, dirs, files in os.walk(results_cols_folder):
+        operation = 'Epsilon Cols'
         for file in files:
             if file.endswith('.json'):
                 print(f"Processing file {file}")
@@ -219,7 +239,20 @@ if __name__ == '__main__':
                     with open(os.path.join(root, file), 'r') as f:
                         data = json.load(f)
                         for model in data.keys():  
-                            sensitivity_analysis(figures_cols_folder, model, data)
+                            sensitivity_analysis(figures_cols_folder, model, data, operation)
+    for root, dirs, files in os.walk(results_rows_folder):
+        operation = 'Epsilon rows'
+        for file in files:
+            if file.endswith('.json'):
+                print(f"Processing file {file}")
+                if 'MARCO' in file:
+                    continue
+                else:
+                    with open(os.path.join(root, file), 'r') as f:
+                        data = json.load(f)
+                        for model in data.keys():  
+                            sensitivity_analysis(figures_rows_folder, model, data, operation)
+
     # data = json.load(open(os.path.join(results_rows_folder, 'epsilon_rows_CLEARLAK.json')))
     # #print(data)
     # sensitivity_analysis(figures_rows_folder, 'CLEARLAK', data)

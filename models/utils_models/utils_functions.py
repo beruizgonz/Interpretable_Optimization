@@ -127,6 +127,8 @@ def get_model_matrices(model):
     return A, b, c, co, lb, ub, of_sense, cons_senses, variable_names
 
 
+
+
 def extract_gurobi_model_data(model):
     """
     Efficiently extracts key matrices and vectors from a Gurobi model. This function retrieves the constraint matrix (A),
@@ -450,7 +452,6 @@ def normalize_features_sparse(A, b):
 
     # Normalize A data in-place
     A.data /= repeated_scalers
-
     return A, b_norm, scalers
 
 
@@ -2670,13 +2671,18 @@ def set_new_bounds(model, alpha_min, alpha_max):
     """
     model.setParam('OutputFlag', 0)
     model.optimize()
+
     try:
         for var in model.getVars():
-            optimal_value = var.x  # Get the optimal value
-            if optimal_value is not None:
-                var.lb = optimal_value * alpha_min
-                var.ub = optimal_value * alpha_max
+            optimal_value = var.X  # Get the optimal value
 
+            if optimal_value is not None:
+                if optimal_value > 0:
+                    var.lb = optimal_value * alpha_min
+                    var.ub = optimal_value * alpha_max
+                else:
+                    var.lb = optimal_value * alpha_max
+                    var.ub = optimal_value * alpha_min
         # Update the model to apply new bounds
         model.update()
         print("Variable bounds updated successfully.")

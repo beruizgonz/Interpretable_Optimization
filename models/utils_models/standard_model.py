@@ -2,7 +2,7 @@ import numpy as np
 import gurobipy as gp
 from gurobipy import GRB
 
-from utils_models.utils_functions import *
+from .utils_functions import *
 
 # PATHS TO THE DATA
 project_root = os.path.dirname(os.getcwd())

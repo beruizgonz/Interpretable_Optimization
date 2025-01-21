@@ -1,5 +1,7 @@
 import os
 
+#from mps_data import detect_objective_and_coefficients_new
+
 def parse_mps(file_path):
     """
     Parse the MPS file into structured data.
@@ -75,7 +77,6 @@ def parse_mps(file_path):
                 row_name = parts[1]
                 value = float(parts[2])
                 data['COLUMNS'][var_name][row_name] = value
-
                 # If there's a second triple on the same line
                 if len(parts) == 5:
                     row_name2 = parts[3]
@@ -92,8 +93,6 @@ def parse_mps(file_path):
                     data['RHS'][rhs_name] = {}
      
                 row_name = parts[1]
-                if row_name == 'e281':
-                    print('e281')
                 value = float(parts[2])
                 data['RHS'][rhs_name][row_name] = value
                 if len(parts) == 5:
@@ -128,8 +127,6 @@ def parse_mps(file_path):
                     bound_name = parts[1]
                     var_name = parts[2]
                     val = None
-                    if 'x618' == var_name:
-                        print('vTotalSCost')
                     if len(parts) == 4:
                         val = float(parts[3])
                     if bound_name not in data['BOUNDS']:
@@ -176,25 +173,26 @@ def detect_objective_and_coefficients_new(file_path):
             # Single N row, no 'obj', use it silently
             objective_row_name = n_rows[0]
    
-
+    print(f"Objective row name: {objective_row_name}")
     # If still no objective row found, return early
     if objective_row_name is None:
         return None, {}, None
 
     # Find candidate objective variables (variables that appear in the objective row)
     candidate_vars = [var for var, row_dict in data['COLUMNS'].items() if objective_row_name in row_dict]
-
     # Identify the auxiliary objective variable as one that links the objective row to exactly one other row
     objective_var = None
     equation = None
     for var in candidate_vars:
         other_rows = [r for r in data['COLUMNS'][var].keys() if r != objective_row_name]
+        print(f"Variable: {var}, other rows: {other_rows}")
         if len(other_rows) == 1:
             objective_var = var
             equation = other_rows[0]
             break
 
     if not objective_var or not equation:
+        print("Warning: could not identify a unique auxiliary variable or equation.")
         # Could not identify a unique auxiliary variable or equation
         return None, {}, None
 
@@ -229,7 +227,7 @@ def modify_mps_objective(file_path, output_path):
     
     # Detect the auxiliary objective variable, variable coefficients, and equation row
     objective_var, variable_coeffs, equation = detect_objective_and_coefficients_new(file_path)
-
+    print(objective_var, variable_coeffs, equation)
     if not objective_var or not variable_coeffs or not equation:
         raise ValueError("No suitable auxiliary objective variable or coefficients detected.")
 
@@ -238,13 +236,12 @@ def modify_mps_objective(file_path, output_path):
         del variable_coeffs[objective_var]
 
     # Determine direction (minimize or maximize) based on the sign of the auxiliary variable's obj coefficient
-    obj_coeff = data['COLUMNS'].get(objective_var, {}).get('OBJ', 0.0)
+    obj_coeff = data['COLUMNS'].get(objective_var, {}).get('obj', 0.0)
     if obj_coeff > 0:
         direction = 'min'
     elif obj_coeff < 0:
         direction = 'max'
-    else:
-        direction = 'min'  # Default assumption if no clue
+
 
     # Remove the auxiliary variable from the objective row
     if objective_var in data['COLUMNS']:
@@ -271,6 +268,14 @@ def modify_mps_objective(file_path, output_path):
     if equation in data['RHS']:
         data['RHS']['OBJ'] = data['RHS'][equation]
         del data['RHS'][equation]
+    
+    if equation in data['RANGES']:
+        data['RANGES']['OBJ'] = data['RANGES'][equation]
+        del data['RANGES'][equation]
+    
+    if objective_var in data['BOUNDS']:
+        data['BOUNDS']['OBJ'] = data['BOUNDS'][objective_var]
+        del data['BOUNDS'][equation]
 
     # Remove the equation row from ROWS section
     data['ROWS'] = [(row_type, row_name) for row_type, row_name in data['ROWS'] if row_name != equation]
@@ -330,7 +335,6 @@ def modify_mps_objective(file_path, output_path):
     print(f"Modified MPS file saved to: {output_path}")
 
 
-
 if __name__ == '__main__':
     # Modify the MPS file in the 'data' directory
     project_root = os.path.dirname(os.getcwd())
@@ -342,8 +346,12 @@ if __name__ == '__main__':
     # output_path = os.path.join(GAMS_path_modified, 'DINAM.mps')
     # modify_mps_objective(file_path, output_path)
     for file in os.listdir(GAMS_path):
-        if file.endswith('AGRESTE.mps'):
+        if  file.endswith('.mps') and not file.endswith('ORANI.mps'):
             file_path = os.path.join(GAMS_path, file)
-            print(os.path.exists(file_path))
+            print(file)
             output_path = os.path.join(GAMS_path_modified, file)
             modify_mps_objective(file_path, output_path)
+            # objective_var, variable_coeffs, equation = detect_objective_and_coefficients_new(file_path)
+            # objective_var1, variable_coeffs1, equation1 = detect_objective_and_coefficients_new1(file_path)
+            # print(objective_var, variable_coeffs, equation)
+            # print(objective_var1, variable_coeffs1, equation1)
