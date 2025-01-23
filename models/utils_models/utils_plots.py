@@ -91,16 +91,16 @@ def plot_results(vector_epsilon, vector1, vector2, model_name, folder, plot_type
     fig1, axs1 = plt.subplots(2, 1, figsize=(8, 12))
     # reverse the x-axis
     if plot_type == 'variables':
-        axs1[0].invert_xaxis()
-        init = max(x_axis)
-        end = min(x_axis)
+        #axs1[0].invert_xaxis()
+        init = min(x_axis)
+        end = max(x_axis)
     else:
         init = min(x_axis)
         end = max(x_axis)
     # First subplot: Objective Value
     axs1[0].plot(x_axis, vector1, marker='o')
     axs1[0].set_xlim(init,end)  # Adjust as needed
-    axs1[0].set_title(f'Objective Value vs. Percentile', fontsize=12)
+    axs1[0].set_title(f'Objective Value vs. Percentage delete', fontsize=12)
     axs1[0].set_xlabel('Percentile', fontsize=12)
     axs1[0].set_ylabel('Objective Value', fontsize=12)
     axs1[0].grid(True)
@@ -108,7 +108,7 @@ def plot_results(vector_epsilon, vector1, vector2, model_name, folder, plot_type
     # Second subplot: Number of Constraints/Variables
     axs1[1].plot(x_axis, vector2, color='orange')
     axs1[1].set_xlim(init, end) # Adjust as needed
-    axs1[1].set_title(f'Number of {plot_type.capitalize()} vs. Percentile', fontsize=12)
+    axs1[1].set_title(f'Number of {plot_type.capitalize()} vs. Percentege delete', fontsize=12)
     axs1[1].set_xlabel('Percentile', fontsize=12)
     axs1[1].set_ylabel(f'Number of {plot_type.capitalize()}', fontsize=12)
     axs1[1].grid(True)

@@ -192,18 +192,18 @@ if __name__ == '__main__':
     # with open(json_path, 'r') as f:
     #     data = json.load(f)
     # sensitivity_analysis(figures_sparsification, model, data)
-    # for root, dirs, files in os.walk(results_sparsification_folder):
-    #     operation = 'Sparsification'
-    #     for file in files:
-    #         if file.endswith('.json'):
-    #             print(f"Processing file {file}")
-    #             if 'MARCO' in file:
-    #                 continue
-    #             else:
-    #                 with open(os.path.join(root, file), 'r') as f:
-    #                     data = json.load(f)
-    #                     for model in data.keys():  
-    #                         sensitivity_analysis(figures_sparsification, model, data,operation)
+    for root, dirs, files in os.walk(results_sparsification_folder):
+        operation = 'Sparsification'
+        for file in files:
+            if file.endswith('.json'):
+                print(f"Processing file {file}")
+                if 'MARCO' in file:
+                    continue
+                else:
+                    with open(os.path.join(root, file), 'r') as f:
+                        data = json.load(f)
+                        for model in data.keys():  
+                            sensitivity_analysis(figures_sparsification, model, data,operation)
     # for root, dirs, files in os.walk(results_dependency_rows_folder):
     #     operation = 'Dependency Rows'
     #     for file in files:
@@ -228,30 +228,30 @@ if __name__ == '__main__':
     #                     data = json.load(f)
     #                     for model in data.keys():  
     #                         sensitivity_analysis(figures_dependency_cols, model, data, operation)
-    for root, dirs, files in os.walk(results_cols_folder):
-        operation = 'Epsilon Cols'
-        for file in files:
-            if file.endswith('.json'):
-                print(f"Processing file {file}")
-                if 'MARCO' in file:
-                    continue
-                else:
-                    with open(os.path.join(root, file), 'r') as f:
-                        data = json.load(f)
-                        for model in data.keys():  
-                            sensitivity_analysis(figures_cols_folder, model, data, operation)
-    for root, dirs, files in os.walk(results_rows_folder):
-        operation = 'Epsilon rows'
-        for file in files:
-            if file.endswith('.json'):
-                print(f"Processing file {file}")
-                if 'MARCO' in file:
-                    continue
-                else:
-                    with open(os.path.join(root, file), 'r') as f:
-                        data = json.load(f)
-                        for model in data.keys():  
-                            sensitivity_analysis(figures_rows_folder, model, data, operation)
+    # for root, dirs, files in os.walk(results_cols_folder):
+    #     operation = 'Epsilon Cols'
+    #     for file in files:
+    #         if file.endswith('.json'):
+    #             print(f"Processing file {file}")
+    #             if 'MARCO' in file:
+    #                 continue
+    #             else:
+    #                 with open(os.path.join(root, file), 'r') as f:
+    #                     data = json.load(f)
+    #                     for model in data.keys():  
+    #                         sensitivity_analysis(figures_cols_folder, model, data, operation)
+    # for root, dirs, files in os.walk(results_rows_folder):
+    #     operation = 'Epsilon rows'
+    #     for file in files:
+    #         if file.endswith('.json'):
+    #             print(f"Processing file {file}")
+    #             if 'MARCO' in file:
+    #                 continue
+    #             else:
+    #                 with open(os.path.join(root, file), 'r') as f:
+    #                     data = json.load(f)
+    #                     for model in data.keys():  
+    #                         sensitivity_analysis(figures_rows_folder, model, data, operation)
 
     # data = json.load(open(os.path.join(results_rows_folder, 'epsilon_rows_CLEARLAK.json')))
     # #print(data)

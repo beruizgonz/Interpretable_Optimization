@@ -18,5 +18,7 @@ def parse_opts():
     parser.add_argument('--norm_abs',default = 'euclidean', type = str, help = 'normalize the absolute value')
     parser.add_argument('--local_solution', default = False, type = bool, help = 'calculate the local solution and use for the bounds')
     parser.add_argument('--sparse', default = True, type = bool, help = 'use the sparsse presolve operations')
+    
+    parser.add_argument('--flexibility', default = False, type = bool, help = 'calculate the flexibility of the sparsification operation')
     args = parser.parse_args()
     return args 

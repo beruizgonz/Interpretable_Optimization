@@ -57,6 +57,23 @@ def infeasibility_index(model, data):
 
     return infeasiblity_index
 
+def infeasibility_distance_index(model, data):
+    if model in data:
+        modelo_datos = data[model]
+        modelo_primal = modelo_datos.get('primal', {})
+        modelo_dual = modelo_datos.get('dual', {})
+        # modelo_pr_eps = modelo_primal.get('epsilon', [])
+        # modelo_pr_of = modelo_primal.get('objective_function', [])
+        # modelo_pr_dv = modelo_primal.get('decision_variables', [])
+        # modelo_pr_ci = modelo_primal.get('changed_indices', [])
+        modelo_pr_cv = modelo_primal.get('constraint_violation', [])
+        modelo_pr_ofod = modelo_primal.get('of_original_decision', [])
+        # modelo_pr_time = modelo_primal.get('execution_time', [])
+        modelo_du_dv = modelo_dual.get('decision_variables', []) 
+
+    
+
+
 def complexity_index(model, data):
     if model in data:
         modelo_datos = data[model]

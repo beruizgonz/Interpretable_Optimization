@@ -214,33 +214,58 @@ def plot_changes_histogram(dict_change_groups, dict_group, title, epsilon_number
     plt.show()
     print(f"Plot saved as {filename}")
 
-
-def interactive_plot_loop(model, group_variables, group_constraints_original):
+def plot_group_matrix(variable_groups, constraint_groups, associations):
     """
-    Interactive loop to allow dynamic selection of epsilon number and plot updates.
+    Plots a heatmap to represent associations between variable groups and constraint groups.
 
     Parameters:
-    - model: The model to analyze.
-    - group_variables: The variable groups in the model.
-    - group_constraints_original: The constraint groups in the model.
+        variable_groups (list): List of variable group names.
+        constraint_groups (list): List of constraint group names.
+        associations (dict): Dictionary where keys are tuples (variable_group, constraint_group) 
+                             and values are the association strengths (e.g., non-zero counts).
+
+    Returns:
+        None
     """
-    while True:
-        try:
-            epsilon_number = int(input("Enter the EPSILON_NUMBER (or -1 to exit): "))
-            if epsilon_number == -1:
-                print("Exiting interactive plot loop.")
-                break
+    # Initialize the matrix
+    num_vars = len(variable_groups)
+    num_constraints = len(constraint_groups)
+    matrix = np.zeros((num_constraints, num_vars))
 
-            # Run analysis with the current EPSILON_NUMBER
-            changed_group_var, changed_group_constraints = main(model, epsilon_number, 'Sparsification')
-            count_by_group_var = analyzes_groups(changed_group_var)
-            count_by_group_constraints = analyzes_groups(changed_group_constraints)
-            total_variances = get_total_by_group(group_variables)
-            total_constraints = get_total_by_group(group_constraints_original)
+    variable_groups = sorted(variable_groups)
+    constraint_groups = sorted(constraint_groups)
+    # Fill the matrix using the associations dictionary
+    variable_index = {group: idx for idx, group in enumerate(variable_groups)}
+    constraint_index = {group: idx for idx, group in enumerate(constraint_groups)}
+    # sort variable groups and constraint groups
 
-            # Generate plots
-            plot_changes_histogram(count_by_group_var, total_variances, 'Changes in Variables by Group', epsilon_number)
-            plot_changes_histogram(count_by_group_constraints, total_constraints, 'Changes in Constraints by Group', epsilon_number)
 
-        except ValueError:
-            print("Invalid input. Please enter a valid integer or -1 to exit.")
+    for (constr_group, var_group), value in associations.items():
+        if var_group in variable_index and constr_group in constraint_index:
+            i = variable_index[var_group]
+            j = constraint_index[constr_group]
+            matrix[j,i] = value
+
+    # Create the heatmap
+    fig, ax = plt.subplots(figsize=(20, 10))  # Increased figure size
+    cax = ax.matshow(matrix, cmap='viridis')
+    ax.set_aspect(0.5)
+    # Add colorbar for intensity scale
+    plt.colorbar(cax)
+
+    # Set axis labels
+    ax.set_xticks(np.arange(num_vars))
+    ax.set_yticks(np.arange(num_constraints))
+    ax.set_xticklabels(variable_groups, rotation=45, ha='left', fontsize=10)  # Increased font size
+    ax.set_yticklabels(constraint_groups, fontsize=10)  # Increased font size
+
+    # Label each cell with the corresponding association value
+    for i in range(num_vars):
+        for j in range(num_constraints):
+            ax.text(i, j, f"{matrix[j,i]:.0f}", va='center', ha='center', color='white', fontsize=7.5)   # Increased font size
+
+    plt.title('Number of elements per Constraint-Variable Group', fontsize=16)  # Increased font size
+    plt.xlabel('Variables Groups', fontsize=14)  # Increased font size
+    plt.ylabel('Constraints Groups', fontsize=14)  # Increased font size
+    plt.tight_layout()
+    plt.show()

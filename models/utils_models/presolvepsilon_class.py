@@ -464,6 +464,10 @@ class PresolvepsilonOperationsSparse:
         condition = epsilon_matrix < epsilon
         A_norm.data[condition] = 0
         A_norm.eliminate_zeros()
+        # By row # Calculate the number of elements in each row that are set to zero
+        # Difference between the number of non-zero elements before and after sparsification by row
+        row_diff = np.diff(A_norm.indptr)
+        print(row_diff  )
         # Get the rows where all the elements are zero
         # Convert to array to avoid issues with sparse matrices
         zero_rows_sparse = np.where(A_norm.getnnz(axis=1) == 0)[0]

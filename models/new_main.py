@@ -241,7 +241,7 @@ def sensitivity_analysis_file(file, save_path, opts):
     elif opts.dependency_cols:
         operation = 'dependency_cols'
 
-    model_save_path = os.path.join(save_path, f'epsilon_{operation}_{model_name}.json')
+    model_save_path = os.path.join(save_path, f'epsilon_{operation}_{model_name}_flexibility.json')
     dict2json(results, model_save_path)
 
     return results
@@ -305,7 +305,7 @@ if __name__ == '__main__':
     opts.operate_epsilon_cols = False
     opts.operate_epsilon_rows = False   
     opts.sparsification = True
-    sensitivity_analysis_file(real_model_path, save_path = prueba, opts = opts)
+    sensitivity_analysis_file(real_model_path, save_path = sparsification_results, opts = opts)
     # print('CHANGE TO SPARSIFICATION')
     # opts.operate_epsilon_cols = False
     # opts.operate_epsilon_rows = False

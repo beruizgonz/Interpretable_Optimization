@@ -160,9 +160,9 @@ def plot_subplots(folder, model_name, vector_epsilon, vector1, vector2, vector3,
     axs[1].set_xlabel('Epsilon', fontsize=12)
     axs[1].set_ylabel('Value', fontsize=12)
 
-    axs[0].set_xlim(0, 0.25)  
-    axs[1].set_xlim(0, 0.25)
-    axs[2].set_xlim(0, 0.25)
+    axs[0].set_xlim(x_axis[0], x_axis[-1])  # Adjust x-axis limits
+    axs[1].set_xlim(x_axis[0], x_axis[-1])  # Adjust x-axis limits
+    axs[2].set_xlim(x_axis[0], x_axis[-1])  # Adjust x-axis limits
 
     # ax[2] add legend
     axs[2].legend(['Total', 'Rows', 'Columns'])
