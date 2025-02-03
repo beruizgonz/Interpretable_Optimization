@@ -9,6 +9,16 @@ from utils_models.presolvepsilon_class import PresolvepsilonOperations
 from utils_models.utils_functions import *
 from utils_models.standard_model import standard_form, construct_dual_model, standard_form_e1
 
+#DATA PATH
+
+project_root = os.path.dirname(os.getcwd())
+project_root = os.path.dirname(project_root)
+model_path = os.path.join(project_root, 'data/GAMS_library', 'INDUS.mps')
+GAMS_path = os.path.join(project_root, 'data/GAMS_library')
+GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
+model_path_modified = os.path.join(GAMS_path_modified, 'WHOUSE.mps')
+real_path = os.path.join(project_root, 'data/real_data')
+real_model_path = os.path.join(real_path, 'openTEPES_EAPP_2030_sc01_st1.mps')
 
 def main_bounds(folder):
     # Create a pandas dataframe
@@ -42,7 +52,7 @@ def main_bounds(folder):
            
             # Uncomment these if you want to calculate bounds later
         
-            A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names= calculate_bounds_candidates(standard_model, None, None)
+            A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names= calculate_bounds_candidates_sparse_improve(standard_model, None, None)
             bounds_model = build_model(A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names)
             bounds_model.setParam('OutputFlag', 0)
             bounds_model.optimize()
@@ -87,15 +97,6 @@ def main_bounds(folder):
     except Exception as e:
         print(f"Failed to save results to Excel: {e}")
 
-
-
-project_root = os.path.dirname(os.getcwd())
-project_root = os.path.dirname(project_root)
-model_path = os.path.join(project_root, 'data/GAMS_library', 'INDUS.mps')
-GAMS_path = os.path.join(project_root, 'data/GAMS_library')
-GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
-model_path_modified = os.path.join(GAMS_path_modified, 'DINAM.mps')
-
 def standar():
     GAMS_path = os.path.join(project_root, 'data/GAMS_library')
     print(len(os.listdir(GAMS_path)))
@@ -117,9 +118,32 @@ def standar():
         #if original_primal.Status == GRB.OPTIMAL and standard_model.Status == GRB.OPTIMAL:
         print(model_name[-1], original_primal.objVal,  standard_model.objVal)
 
+def see_numbers_bounds(model): 
+    model = gp.read(model)
+    standard_model = standard_form_e1(model)
+    A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names= calculate_bounds_candidates_sparse_improve(standard_model, None, None)
+    # Build the model with the new bounds
+    bounds_model = build_model(A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names)
+    bounds_model.setParam('OutputFlag', 0)
+    bounds_model.optimize()
+    print(bounds_model.objVal)
+    lb_improve = np.array(lb_new)
+    ub_improve = np.array(ub_new)
+
+    # Compare the bounds that are not zero for both methods and that are not inf for the upper bounds
+    print('Number variables')
+    print(len(lb_improve))
+    print('Lower bounds')
+    print(len(lb_improve[lb_improve != 0]))
+    print((len(lb_improve)-len(lb_improve[lb_improve == 0])) / len(lb_improve))
+    print('Upper bounds')
+    print(len(ub_improve[ub_improve != np.inf]))
+    print((len(ub_improve)-len(ub_improve[ub_improve == np.inf])) / len(ub_improve))
+    return standard_model
 
 if __name__ == '__main__':
-    main_bounds(GAMS_path_modified)
+    standard_model = see_numbers_bounds(real_model_path)
+    #print_model(standard_model)
     # # results = nested_dict()
     # # for model_name in os.listdir(GAMS_path):
     # #     model_path = os.path.join(GAMS_path, model_name)

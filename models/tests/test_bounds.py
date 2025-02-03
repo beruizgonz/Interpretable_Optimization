@@ -31,8 +31,8 @@ def bounds(model_name):
     """
     model = gp.read(model_name)
     standard_model = standard_form_e1(model)  # Assuming `standard_form` is properly defined
-    lb, ub = calculate_bounds_candidates(standard_model)  # Assuming `calculate_bounds2` returns bounds
-    return lb, ub
+    A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names= calculate_bounds_candidates_sparse_improve(standard_model, None, None)  # Assuming `calculate_bounds2` returns bounds
+    return lb_new, ub_new
 
 
 def excel_bounds(path_excel, models):

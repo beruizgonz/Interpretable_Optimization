@@ -1,5 +1,7 @@
 from gurobipy import GRB, Model
 
+
+
 """
 In this file, we define some simplified models to test the functionality of the optimization models.
 """

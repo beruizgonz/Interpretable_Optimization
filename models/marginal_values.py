@@ -8,7 +8,7 @@ from gurobipy import GRB, Model
 from utils_models.utils_functions import *
 from utils_models.utils_plots import pareto_analysis, plot_results
 from utils_models.standard_model import*
-from description_data.description_open_TEPES import *
+#from description_data.description_open_TEPES import *
 
 # PATHS TO THE LOAD THE DATA
 project_root = os.path.dirname(os.getcwd())
@@ -21,17 +21,19 @@ model_path_modified = os.path.join(GAMS_path_modified, 'DINAM.mps')
 real_model_path = os.path.join(real_data_path,  'openTEPES_EAPP_2030_sc01_st1.mps')
 
 # PATH TO SAVE THE RESULTS
-results_folder = os.path.join(project_root, 'figures_new')
-marginal_values = os.path.join(results_folder, 'marginal_values')
+figures_folder = os.path.join(project_root, 'figures_new')
+results_folder = os.path.join(project_root, 'results_new')
+marginal_values = os.path.join(figures_folder, 'marginal_values')
 save_path_variable = os.path.join(marginal_values, 'variables')
 save_path_constraints = os.path.join(marginal_values, 'constraints')
-save_simplified_constraints = os.path.join(marginal_values, 'simplified_constraints_1')
-save_simplified_variables = os.path.join(marginal_values, 'simplified_variables_1')
+save_simplified_constraints = os.path.join(marginal_values, 'real_problems/simplified_constraints_percentage')
+save_simplified_variables = os.path.join(marginal_values, 'real_problems/simplified_variables_percentage')
 save_simplified_importance_variables = os.path.join(marginal_values, 'simplified_importance_variables')
 save_pareto_variables_importance = os.path.join(marginal_values, 'pareto_variables_importance')
 save_pareto_constraints = os.path.join(marginal_values, 'pareto_constraints')
 save_pareto_variables = os.path.join(marginal_values, 'pareto_variables')
-
+save_folder_variables = os.path.join(results_folder, 'marginal_values/real_problems/simplified_variables_percentil')
+save_folder_constraints = os.path.join(results_folder, 'marginal_values/real_problems/simplified_constraints_percentil')
 
 # PARAMETERS FOR THE ANALYSIS
 PERCENTILE_MIN_V= 0
@@ -177,6 +179,7 @@ def marginal_values_handler(model, values, names, percentile, entity_type='const
 
     # Compute the absolute values
     abs_values = np.abs(values)
+    get_remove_name = []
     if type_simplyfied == 'Percentile':
     # Determine the threshold value based on the specified percentile
         threshold = np.percentile(abs_values, percentile)
@@ -201,8 +204,11 @@ def marginal_values_handler(model, values, names, percentile, entity_type='const
         for i in range(int(len(order)*percentile/100)):
             if entity_type == 'constraints':
                 simplified_model.remove(simplified_model.getConstrByName(names[order[i]]))
+                get_remove_name.append(names[order[i]])
             elif entity_type == 'variables':
+                order = order[::-1]
                 simplified_model.remove(simplified_model.getVarByName(names[order[i]]))
+                get_remove_name.append(names[order[i]])
             elif entity_type == 'importance_variables':
                 simplified_model.remove(simplified_model.getVarByName(names[order[i]]))
     simplified_model.update()
@@ -217,13 +223,12 @@ def marginal_values_handler(model, values, names, percentile, entity_type='const
         print(f"Model optimization was not successful after {entity_type} removal. Status:", simplified_model.status)
         objective_value = np.nan
 
-
     num_entities_after = len(simplified_model.getConstrs()) if entity_type == 'constraints' else len(simplified_model.getVars())
     print(f'Num {entity_type} after removal:', num_entities_after)
 
-    return num_entities_after, objective_value, simplified_model
+    return num_entities_after, objective_value, simplified_model, get_remove_name
 
-def main_marginal_values_handler(model, min_threshold, max_threshold, step, entity_type='constraints', type_simplyfied='Percentile'):
+def main_marginal_values_handler(model, model_name, save_folder, min_threshold, max_threshold, step, save_result = True, entity_type='constraints', type_simplyfied='Percentile'):
     """
     Iterates over thresholds to analyze the effect of removing constraints or variables based on marginal values.
 
@@ -255,12 +260,18 @@ def main_marginal_values_handler(model, min_threshold, max_threshold, step, enti
     thresholds = np.arange(min_threshold, max_threshold, step)[::-1]
     num_entities = []
     objective_values = []
-
+    names_remove = []
     for threshold in thresholds:
-        num, obj_value, _ = marginal_values_handler(model, values, names, threshold, entity_type, type_simplyfied)
+        num, obj_value, _, name = marginal_values_handler(model, values, names, threshold, entity_type, type_simplyfied)
         num_entities.append(num)
         objective_values.append(obj_value)
+        names_remove.append(name)
 
+    results = {'thresholds': thresholds[::-1], 'num_entities': num_entities[::-1], 'objective_values': objective_values[::-1], 'names_remove': names_remove[::-1]}  
+    if save_result: 
+        # Save the results in a json file   
+        save_path = os.path.join(save_folder, f'{model_name}_{entity_type}.json')
+        dict2json(results, save_path)
     return thresholds, num_entities, objective_values
 
 
@@ -279,7 +290,7 @@ def importance_variables(model, variables, m_constraints):
     m_constraints = m_constraints.reshape(-1, 1)
     coeff = np.array([var.Obj for var in model.getVars()])
     c = np.array(c)
-    importance = np.abs(c - A.T.dot(m_constraints).flatten()) * variables
+    importance = np.abs(c - A.T.dot(m_constraints).flatten()) 
     return importance
 
 def test_marginal_variables(model): 
@@ -302,45 +313,7 @@ def compared_importance_marginal_variables(model):
     m_varialbes_basis = m_variables[basis_variables]
     print(m_varialbes_basis)
 
-def marginal_values_open_tepes(model):
-    """
-    Calculate the marginal values for the openTEPES model
-    """
-    obj_value, variables, marginal_variables, marginal_constraints = get_marginal_values(model)
-    # Order the marginal_values
-    names_vars, asos_vars, dict_vars, inverted_group_v = groups_by_variables(model)
-    names_constrs, asos_constr, dict_constr, inverted_group_c = groups_by_constraints(model) 
-    # Total marginal value per group
-    total_marginal_values_variables = dict.fromkeys(dict_vars.keys(), 0)
-    total_marginal_values_constraints = dict.fromkeys(dict_constr.keys(), 0)
-    postoname = map_position_to_names(model)
-    for position, names in postoname.items(): 
-        index_var = position[1]
-        index_constr = position[0]
-        name_var = names[1]
-        name_constr = names[0]
-        total_marginal_values_variables[inverted_group_v[name_var]] += abs(marginal_variables[index_var])
-        total_marginal_values_constraints[inverted_group_c[name_constr]] += abs(marginal_constraints[index_constr])
-    # Order the groups by the total marginal value
-    total_marginal_values_variables = dict(sorted(total_marginal_values_variables.items(), key=lambda item: item[1], reverse=True))
-    total_marginal_values_constraints = dict(sorted(total_marginal_values_constraints.items(), key=lambda item: item[1], reverse=True))
-    plt.figure(figsize=(10, 5))
-    plt.bar(range(len(total_marginal_values_variables)), total_marginal_values_variables.values(), color='skyblue', edgecolor='black')
-    plt.xticks(range(len(total_marginal_values_variables)), total_marginal_values_variables.keys(), rotation=90)
-    plt.xlabel('Variables')
-    plt.ylabel('Normalized reduced costs')
-    plt.title('Marginal values for Variables: openTEPES')
-    plt.tight_layout()
-    plt.show()
-    # Make the same for the constraints
-    plt.figure(figsize=(10, 5))
-    plt.bar(range(len(total_marginal_values_constraints)), total_marginal_values_constraints.values(), color='skyblue', edgecolor='black')
-    plt.xticks(range(len(total_marginal_values_constraints)), total_marginal_values_constraints.keys(), rotation=90)
-    plt.xlabel('Constraints')
-    plt.ylabel('Normalized shadow prices')
-    plt.title('Marginal values for Constraints: openTEPES')
-    plt.tight_layout()
-    plt.show()
+
 
 if __name__ == '__main__':
     # for model_name in os.listdir(GAMS_path_modified):
@@ -366,8 +339,15 @@ if __name__ == '__main__':
         # v_values, v_variables = get_values_variables(model)
         # pareto_analysis(save_pareto_variables, name, v_values, v_variables, 'Variables')
     model = gp.read(real_model_path)
+    model_name = real_model_path.split('/')[-1].split('.')[0]
+    print(model_name)
+    model = standard_form_e1(model)
     model.setParam('OutputFlag', 0)
-    marginal_values_open_tepes(model)
+    thres, num, obj = main_marginal_values_handler(model, model_name,  save_folder_variables, PERCENTILE_MIN_V, PERCENTILE_MAX_V, STEP_V, True, 'variables', 'Percelntil')
+    #plot_results(thres, obj, num, 'openTEPES_EAPP_2030_sc01_st1', save_simplified_variables, 'variables')
+    print(os.path.exists(save_simplified_constraints))
+    thres, num, obj = main_marginal_values_handler(model, model_name, save_folder_constraints, PERCENTILE_MIN_C, PERCENTILE_MAX_C, STEP_C, True, 'constraints', 'Percentil')
+    #plot_results(thres, obj, num, 'openTEPES_EAPP_2030_sc01_st1', save_simplified_constraints, 'constraints')
     # obj, variables, m_variables, m_constraints = get_marginal_values(model)
     # importance = importance_variables(model, variables, m_constraints)
     # print(importance)

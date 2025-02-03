@@ -123,8 +123,8 @@ def get_model_matrices(model):
 
     # Getting the variable names
     variable_names = [var.VarName for var in model.getVars()]
-
-    return A, b, c, co, lb, ub, of_sense, cons_senses, variable_names
+    constraint_names = [constr.ConstrName for constr in model.getConstrs()]
+    return A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names
 
 
 
@@ -227,7 +227,7 @@ def save_json(A, b, c, lb, ub, of_sense, cons_senses, save_path, co=0, variable_
             with open(file_name, 'w') as file:
                 json.dump(data, file)
 
-def build_model(A, b, c, co, lb, ub, of_sense, cons_senses, variable_names):
+def build_model(A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraints_names = None):
     model = gp.Model()
     num_variables = len(c)
     x = []
@@ -249,14 +249,14 @@ def build_model(A, b, c, co, lb, ub, of_sense, cons_senses, variable_names):
         end = A.indptr[i + 1]
         variables = A.indices[start:end]
         coefficients = A.data[start:end]
-
+        constraint_name = constraints_names[i] if constraints_names is not None and i < len(constraints_names) else f'constraint_{i}'
         constraint_expr = gp.quicksum(coefficients[j] * x[variables[j]] for j in range(len(variables)))
         if cons_senses[i] == '<' or cons_senses[i] == '<=':
-            model.addConstr(constraint_expr <= b[i], name=f'constraint_{i}')
+            model.addConstr(constraint_expr <= b[i], name= constraint_name)
         elif cons_senses[i] == '>' or cons_senses[i] == '>=':
-            model.addConstr(constraint_expr >= b[i], name=f'constraint_{i}')
+            model.addConstr(constraint_expr >= b[i], name= constraint_name)
         elif cons_senses[i] == '=':
-            model.addConstr(constraint_expr == b[i], name=f'constraint_{i}')
+            model.addConstr(constraint_expr == b[i], name= constraint_name)
 
     model.update()
 
@@ -410,49 +410,83 @@ def normalize_features(A, b):
     b_norm = b / scalers
     return norm_A, b_norm, scalers
 
+
 def normalize_features_sparse(A, b):
-    """
-    Normalize a CSR matrix by the max absolute value of each row without explicit Python loops.
-    Rows with no nonzero elements are left unchanged.
-    
-    Parameters:
-    A (scipy.sparse.csr_matrix): The matrix to be normalized (must be CSR).
-    b (np.ndarray): The corresponding right-hand side vector.
-    
-    Returns:
-    norm_A (scipy.sparse.csr_matrix): The normalized matrix.
-    b_norm (np.ndarray): The normalized b vector.
-    scalers (np.ndarray): Scale factors (max absolute values per row, or 1 for empty rows).
-    """
-    # Ensure A is CSR
     if not isinstance(A, csr_matrix):
         A = A.tocsr()
 
-    # Compute absolute values of nonzero elements
     abs_data = np.abs(A.data)
-
-    # Use reduceat to compute max per row segment
-    # reduceat will apply np.maximum starting at each index in A.indptr[:-1] up to A.indptr[i+1]-1
     row_maxes = np.maximum.reduceat(abs_data, A.indptr[:-1])
-
-    # Identify empty rows: those with no elements have indptr[i] == indptr[i+1]
     empty_mask = (A.indptr[1:] == A.indptr[:-1])
     row_maxes[empty_mask] = 0.0
-
-    # Define scalers: if row_max is 0, use 1 to avoid division by zero
+    A_norm = A.copy()   
     scalers = np.where(row_maxes == 0, 1.0, row_maxes)
-
-    # Normalize b
     b = np.asarray(b, dtype=A.data.dtype)
     b_norm = b / scalers
-
-    # Compute how many elements per row to know how to repeat scalers for A.data
-    row_lengths = np.diff(A.indptr)
+    
+    row_lengths = np.diff(A_norm.indptr)
     repeated_scalers = np.repeat(scalers, row_lengths)
+    A_norm.data /= repeated_scalers
 
-    # Normalize A data in-place
-    A.data /= repeated_scalers
-    return A, b_norm, scalers
+    
+    # Optionally avoid re-wrapping in a new CSR if A is already CSR:
+    # return A, b_norm, scalers
+    return A_norm, b_norm, scalers
+
+def normalize_features_variable(A, b, c):
+    """
+    Normalize each column (i.e., each variable) of a CSR matrix by its maximum absolute value.
+    Columns that are entirely zero get a scale factor of 1.0 (so they remain unchanged).
+
+    Parameters
+    ----------
+    A : scipy.sparse.csr_matrix, shape (m, n)
+        Constraint matrix in CSR format.
+    b : array_like, shape (m,)
+        Right-hand side vector. (Typically unchanged in column scaling.)
+    c : array_like, shape (n,)
+        Objective coefficients, one for each column/variable.
+
+    Returns
+    -------
+    A_norm     : csr_matrix
+        A copy of A with each column scaled by 1 / (column max).
+    b_norm     : np.ndarray
+        Same as b (no scaling for RHS in a column-based approach).
+    c_norm     : np.ndarray
+        Objective coefficients scaled by 1 / (column max).
+    scalers    : np.ndarray, shape (n,)
+        The scaling factors (column maxima). If col j is all zeros, scalers[j] = 1.
+    """
+    if not isinstance(A, csr_matrix):
+        A = A.tocsr()
+
+    m, n = A.shape
+
+    # 1) Find max(|a_{ij}|) for each column j
+    col_maxes = np.zeros(n, dtype=A.data.dtype)
+    abs_data  = np.abs(A.data)
+    # np.maximum.at allows "grouped" max over column indices
+    np.maximum.at(col_maxes, A.indices, abs_data)
+
+    # 2) For columns that are entirely zero, use scale factor = 1.0
+    scalers = np.where(col_maxes == 0, 1.0, col_maxes)
+
+    # 3) Scale the matrix columns in a copy so original A is not modified
+    A_norm = A.copy()
+    # For each nonzero A_norm.data[i], the column is A_norm.indices[i],
+    # so we divide by the scale factor of that column
+    A_norm.data /= scalers[A_norm.indices]
+
+    # 4) Scale c (the objective) by 1/scalers
+    c = np.asarray(c, dtype=A.data.dtype)
+    c_norm = c / scalers
+
+    # 5) Typically, in a column scaling approach, b is unchanged
+    b_norm = np.asarray(b, dtype=A.data.dtype)
+
+    return A_norm, b_norm, c_norm, scalers
+
 
 
 def matrix_sparsification(threshold, A_norm, A):
@@ -1003,7 +1037,7 @@ def measuring_constraint_infeasibility1(target_model, decisions):
     - obj_val (float): Objective value of the given decision vector.
     """
 
-    A, b, c, _, _, _, _, _, _ = get_model_matrices(target_model)
+    A, b, c, _, _, _, _, _, _, _= get_model_matrices(target_model)
     cost = np.array(c)
 
     # Compute all constraint LHS values in one go
@@ -2500,8 +2534,148 @@ def calculate_bounds_candidates_sparse(model, save_path, name, max_iterations=10
     - A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names
     """
 
-    A, b, c, co, lb, ub, of_sense, cons_sense, variable_names = get_model_matrices(model)
+    A, b, c, co, lb, ub, of_sense, cons_sense, variable_names, constraint_names = get_model_matrices(model)
+    print('Non zero elements:', A.nnz)
     A_sparse = csr_matrix(A)  # Ensure A is in CSR format
+    n_constraints, n_variables = A_sparse.shape
+    ub_new = ub.copy()
+    lb_new = lb.copy()
+    b = np.array(b).astype(np.float32)
+
+    # Precompute row_indices for each nonzero entry
+    A_data = A_sparse.data
+    A_indices = A_sparse.indices
+    A_indptr = A_sparse.indptr
+    
+    # row_indices: for each non-zero element in A, store the corresponding row index
+    row_indices = np.empty_like(A_indices, dtype=np.int64)
+    for i in range(n_constraints):
+        start = A_indptr[i]
+        end = A_indptr[i+1]
+        row_indices[start:end] = i
+
+    negative_mask = (A_data < 0)
+    positive_mask = (A_data > 0)
+
+    # Initialize convergence tracking
+    converged = False
+    iteration = 0
+
+    bound_trace = {'iteration': [], 'lb': [], 'ub': []}
+
+    while (not converged) and (iteration < max_iterations):
+        iteration += 1
+        ub_prev = ub_new.copy()
+        lb_prev = lb_new.copy()
+
+        # ======== Step 1: Calculate Upper Bounds ========
+        # min_activity_matrix: contribution of each variable in the min activity calculation
+        # For positive coefficients: min activity = coeff * lb_new[var]
+        # For negative coefficients: min activity = coeff * ub_new[var]
+        min_activity_matrix = np.zeros_like(A_data)
+        min_activity_matrix[negative_mask] = A_data[negative_mask] * ub_new[A_indices[negative_mask]]
+        min_activity_matrix[positive_mask] = A_data[positive_mask] * lb_new[A_indices[positive_mask]]
+
+        # Compute min_activity_sums per row
+        # Using np.add.reduceat on the A_indptr boundaries
+        print(min_activity_matrix.shape)
+        min_activity_sums = np.add.reduceat(min_activity_matrix, A_indptr[:-1])
+        # ub_numerators = b[row] - (min_activity_sum[row] - contribution_of_current_element)
+        ub_numerators = b[row_indices] - (min_activity_sums[row_indices] - min_activity_matrix)
+
+        # Avoid division by zero: filter out A_data == 0
+        nonzero_mask = (A_data != 0)
+        temp_ubs = np.zeros_like(A_data, dtype=float)
+        temp_ubs[nonzero_mask] = ub_numerators[nonzero_mask] / A_data[nonzero_mask]
+
+        # Valid candidate UB conditions: coeff > 0 and ub_numerator > 0
+        valid_ub_mask = ((A_data > 0) & (ub_numerators > 0))  #| ((A_data < 0) & (ub_numerators < 0))
+        # Aggregate candidate upper bounds by taking the minimum for each variable
+        candidate_ub = ub_new.copy()
+        # np.minimum.at applies element-wise min at specified indices
+        np.minimum.at(candidate_ub, A_indices[valid_ub_mask], temp_ubs[valid_ub_mask])
+        # Update ub_new
+        ub_new = np.minimum(ub_new, candidate_ub)
+        # ======== Step 2: Calculate Lower Bounds ========
+        # max_activity_matrix: For positive coefficients: max activity = coeff * ub_new[var]
+        # For negative coefficients: max activity = coeff * lb_new[var]
+        max_activity_matrix = np.zeros_like(A_data)
+        max_activity_matrix[negative_mask] = A_data[negative_mask] * lb_new[A_indices[negative_mask]]
+        max_activity_matrix[positive_mask] = A_data[positive_mask] * ub_new[A_indices[positive_mask]]
+
+        # Compute max_activity_sums per row
+        max_activity_sums = np.add.reduceat(max_activity_matrix, A_indptr[:-1])
+
+        # lb_numerators = b[row] - (max_activity_sum[row] - contribution_of_current_element)
+        lb_numerators = b[row_indices] - (max_activity_sums[row_indices] - max_activity_matrix)
+
+        temp_lbs = np.zeros_like(A_data, dtype=float)
+        temp_lbs[nonzero_mask] = lb_numerators[nonzero_mask] / A_data[nonzero_mask]
+
+        # Valid candidate LB conditions: coeff > 0 and lb_numerator > 0
+        valid_lb_mask = (A_data > 0) & (lb_numerators > 0)
+
+        candidate_lb = lb_new.copy()
+        # Apply element-wise max at indices corresponding to valid_lb_mask
+        np.maximum.at(candidate_lb, A_indices[valid_lb_mask], temp_lbs[valid_lb_mask])
+        # Update lb_new
+        lb_new = np.maximum(lb_new, candidate_lb)
+
+        # Store iteration bounds trace
+        bound_trace['iteration'].append(iteration)
+        bound_trace['lb'].append(lb_new)
+        bound_trace['ub'].append(ub_new)
+
+        # ======== Step 3: Check for Convergence ========
+        # Check if changes are within tolerance
+        if (np.allclose(ub_prev, ub_new, rtol=tol, atol=tol) and
+                np.allclose(lb_prev, lb_new, rtol=tol, atol=tol)):
+            print("Convergence achieved after", iteration, "iterations.")
+            converged = True
+        else:
+            print("Proceeding to next iteration:", iteration)
+
+    if not converged:
+        print(f"Warning: Maximum iterations ({max_iterations}) reached without full convergence.")
+
+    # Save the updated bounds trace
+    if save_path is not None:
+        trace_file = os.path.join(save_path, f"bound_trace_{name}1.json")
+        # Convert to lists for JSON
+        bound_trace_for_json = {
+            'iteration': bound_trace['iteration'],
+            'lb': [arr.tolist() for arr in bound_trace['lb']],
+            'ub': [arr.tolist() for arr in bound_trace['ub']]
+        }
+        with open(trace_file, "w") as f:
+            json.dump(bound_trace_for_json, f, indent=4)
+
+    # Return updated model data
+    return A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names
+
+
+def calculate_bounds_candidates_sparse_improve(model, save_path, name, max_iterations=100, tol=1e-6):
+    """
+    Iteratively calculate and update upper and lower bounds for variables in a linear programming model
+    until convergence is achieved or the maximum number of iterations is reached, using more
+    efficient sparse operations.
+
+    Parameters:
+    - model: The linear programming model containing matrices and bounds.
+    - save_path: Directory to save the trace file (JSON).
+    - name: A name/identifier for the output files.
+    - max_iterations: Maximum number of iterations to perform.
+    - tol: Tolerance for convergence (minimum change in bounds to continue iterating).
+
+    Returns:
+    - A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names
+    """
+
+    A, b, c, co, lb, ub, of_sense, cons_sense, variable_names, constraint_names = get_model_matrices(model)
+    print('A.shape:', A.shape[0]*A.shape[1])
+    print('Non zero elements:', A.nnz)
+    A_sparse = csr_matrix(A)  # Ensure A is in CSR format
+    print(A_sparse.shape)
     n_constraints, n_variables = A_sparse.shape
     ub_new = ub.copy()
     lb_new = lb.copy()
@@ -2550,18 +2724,34 @@ def calculate_bounds_candidates_sparse(model, save_path, name, max_iterations=10
         # Avoid division by zero: filter out A_data == 0
         nonzero_mask = (A_data != 0)
         temp_ubs = np.zeros_like(A_data, dtype=float)
-        temp_ubs[nonzero_mask] = ub_numerators[nonzero_mask] / A_data[nonzero_mask]
-
+        temp_ubs = ub_numerators / A_data
         # Valid candidate UB conditions: coeff > 0 and ub_numerator > 0
-        valid_ub_mask = (A_data > 0) & (ub_numerators > 0)
+        valid_ub_mask = ((A_data > 0) & (ub_numerators >= 0))  #| ((A_data < 0) & (ub_numerators < 0))
+        valid_lb_mask = ((A_data < 0) & (ub_numerators <= 0))
 
+        print('Valid ub:', np.sum(valid_ub_mask))
         # Aggregate candidate upper bounds by taking the minimum for each variable
         candidate_ub = ub_new.copy()
+        candidate_lb = lb_new.copy()
         # np.minimum.at applies element-wise min at specified indices
         np.minimum.at(candidate_ub, A_indices[valid_ub_mask], temp_ubs[valid_ub_mask])
-
+        np.maximum.at(candidate_lb, A_indices[valid_lb_mask], temp_ubs[valid_lb_mask])
         # Update ub_new
         ub_new = np.minimum(ub_new, candidate_ub)
+        lb_new = np.maximum(lb_new, candidate_lb)
+        # num_columns = np.max(A_indices) + 1  # Assuming 0-based column indices
+        # column_min_ub = np.full(num_columns, np.inf)  # Initialize with a very high value
+        # column_max_lb = np.full(num_columns, -np.inf)  # Initialize with a very low value
+        # print('Column min ub:', column_min_ub.shape)
+        # # Compute the minimum value per column
+        # np.minimum.at(column_min_ub, A_indices[valid_ub_mask], temp_ubs[valid_ub_mask])
+        # np.maximum.at(column_max_lb, A_indices[valid_lb_mask], temp_ubs[valid_lb_mask])
+        # # Apply per-column min updates to `candidate_ub`
+        # # Get the minimum value for each column without using ub_new
+        # candidates_ub = np.minimum(ub_new, column_min_ub)
+        # candidate_lb = np.maximum(lb_new, column_max_lb)
+        # ub_new = candidates_ub
+        # lb_new = candidate_lb
 
         # ======== Step 2: Calculate Lower Bounds ========
         # max_activity_matrix: For positive coefficients: max activity = coeff * ub_new[var]
@@ -2577,18 +2767,33 @@ def calculate_bounds_candidates_sparse(model, save_path, name, max_iterations=10
         lb_numerators = b[row_indices] - (max_activity_sums[row_indices] - max_activity_matrix)
 
         temp_lbs = np.zeros_like(A_data, dtype=float)
-        temp_lbs[nonzero_mask] = lb_numerators[nonzero_mask] / A_data[nonzero_mask]
 
+        temp_lbs = lb_numerators / A_data
         # Valid candidate LB conditions: coeff > 0 and lb_numerator > 0
         valid_lb_mask = (A_data > 0) & (lb_numerators > 0)
-
+        not_valid_lb = (A_data > 0) & (lb_numerators < 0)
+        valid_ub_mask = (A_data < 0) & (lb_numerators < 0)
+        not_valid_ub = (A_data < 0) & (lb_numerators >= 0)
+        # print the number of elements that are valid lb
+        print('Valid lb:', np.sum(valid_lb_mask))
         candidate_lb = lb_new.copy()
+        candidate_ub = ub_new.copy()   
         # Apply element-wise max at indices corresponding to valid_lb_mask
         np.maximum.at(candidate_lb, A_indices[valid_lb_mask], temp_lbs[valid_lb_mask])
-
+        np.minimum.at(candidate_ub, A_indices[valid_ub_mask], temp_lbs[valid_ub_mask])
         # Update lb_new
         lb_new = np.maximum(lb_new, candidate_lb)
-
+        ub_new = np.minimum(ub_new, candidate_ub)
+        # num_columns = np.max(A_indices) + 1  # Assuming 0-based column indices
+        # column_max_lb = np.full(num_columns, -np.inf)  # Initialize with a very low value
+        # print('Column max lb:', column_max_lb.shape)
+        # # Compute the maximum value per column
+        # np.maximum.at(column_max_lb, A_indices[valid_lb_mask], temp_lbs[valid_lb_mask])
+        # # Apply per-column max updates to `candidate_lb`
+        # # Get the maximum value for each column without using lb_new
+        # print(lb_new.shape)
+        # candidate_lb = np.maximum(lb_new, column_max_lb)
+        lb_new = candidate_lb   
         # Store iteration bounds trace
         bound_trace['iteration'].append(iteration)
         bound_trace['lb'].append(lb_new)

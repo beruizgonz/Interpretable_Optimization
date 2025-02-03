@@ -338,7 +338,7 @@ def construct_model_from_json(data_path):
 def construct_dual_model(standard_model):
 
     # Extract primal model data
-    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(standard_model)
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names,constraint_names = get_model_matrices(standard_model)
 
     # Initialize the dual model
     dual_model = gp.Model('DualModel')
@@ -352,7 +352,7 @@ def construct_dual_model(standard_model):
 
     # Since all primal constraints are equality constraints, dual variables are unrestricted
     # Create dual variables as an MVar with unrestricted bounds
-    dual_vars = dual_model.addMVar(shape=num_constraints, lb=-GRB.INFINITY, name='y')
+    dual_vars = dual_model.addMVar(shape=num_constraints, lb=-GRB.INFINITY, name=constraint_names)
 
     dual_model.update()
 
@@ -386,7 +386,7 @@ def construct_dual_model(standard_model):
 
     # Add dual constraints: A^T y >= c or A^T y <= c based on the primal objective sense
     for j in range(num_variables):
-        constr_name = f'constraint_{variable_names[j]}'
+        constr_name = f'{variable_names[j]}'
         # if inequality_sense == '>=':
         #     dual_model.addConstr(constr_exprs[j] >= c[j], name=constr_name)
         # else:
@@ -396,6 +396,7 @@ def construct_dual_model(standard_model):
     dual_model.update()
     return dual_model
 
+
 def construct_dual_model_sparse(standard_model):
     """
     Constructs a dual model from a given standard primal model, supporting sparse matrices.
@@ -404,11 +405,11 @@ def construct_dual_model_sparse(standard_model):
         standard_model: The primal model object containing all required data.
 
     Returns:
-        dual_model: The constructed dual Gurobi dual model.
+        dual_model: The constructed Gurobi dual model.
     """
 
     # Extract primal model data
-    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(standard_model)
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(standard_model)
 
     if not isinstance(A, csr_matrix):
         A = csr_matrix(A)
@@ -418,27 +419,30 @@ def construct_dual_model_sparse(standard_model):
 
     num_constraints, num_variables = A.shape
 
-    # Initialize the dual model
     dual_model = gp.Model('DualModel')
     dual_model.setParam("OutputFlag", 0)
 
-    dual_vars = dual_model.addMVar(shape=num_constraints, lb=-GRB.INFINITY, name='y')
+    dual_vars = dual_model.addMVar(shape=num_constraints, lb=-GRB.INFINITY)
+
+    for i, name in enumerate(constraint_names):
+        dual_vars[i].VarName = name
 
     dual_obj = b @ dual_vars + co
 
     if of_sense == GRB.MINIMIZE:
         dual_obj_sense = GRB.MAXIMIZE
-        inequality_sense = '<='  # Dual constraints: A^T y >= c
-    # else:
-    #     # Primal maximization => Dual minimization
-    #     dual_obj_sense = GRB.MINIMIZE
-    #     inequality_sense = '<='  # Dual constraints: A^T y <= c
+        inequality_sense = np.full(num_variables, GRB.LESS_EQUAL)
+    else:
+        dual_obj_sense = GRB.MINIMIZE
+        inequality_sense = np.full(num_variables, GRB.GREATER_EQUAL)
 
     dual_model.setObjective(dual_obj, dual_obj_sense)
+
     A_transpose = A.transpose()
-    dual_model.addMConstr(A_transpose, dual_vars, inequality_sense, c, name='constraints')
+    dual_model.addMConstr(A_transpose, dual_vars, inequality_sense, c, name=variable_names)
 
     return dual_model
+
 
 
 if __name__ == '__main__':   

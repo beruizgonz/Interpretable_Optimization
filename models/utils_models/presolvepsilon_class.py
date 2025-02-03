@@ -85,8 +85,9 @@ class PresolvepsilonOperations:
         
         if self.opts.sparsification:
             print("Sparsification operation")
-            self.sparsification_operation(epsilon = epsilon)
-        
+            #self.sparsification_operation(epsilon = epsilon)
+            self.improve_sparsity(epsilon = epsilon)
+
         if self.opts.dependency_rows:
             print("Linear dependency rows")
             self.find_basis(epsilon = epsilon)
@@ -383,7 +384,7 @@ class PresolvepsilonOperationsSparse:
         else:
             print("Using the model matrices")
             model_bounds = model
-        self.A, self.b, self.c, self.co, self.lb, self.ub, self.of_sense, self.cons_senses, self.variable_names = (
+        self.A, self.b, self.c, self.co, self.lb, self.ub, self.of_sense, self.cons_senses, self.variable_names, self.constraint_names = (
             get_model_matrices(model_bounds))
         ub = np.array(self.ub)
         print('Finite upper: ', np.sum(np.isfinite(ub)), 'Total upper: ', len(ub))
@@ -401,9 +402,10 @@ class PresolvepsilonOperationsSparse:
         
         if self.opts.sparsification:
             print("Sparsification operation")
-            self.sparsification_operation_sparse(epsilon = epsilon)
-        
-        return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names,
+            #self.sparsification_operation_sparse(epsilon = epsilon)
+            self.improve_sparsity(epsilon = epsilon)
+
+        return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names, self.constraint_names,
                 self.change_dictionary, self.operation_table)  
 
     def sparsification_operation_sparse(self, epsilon=1e-6):
@@ -473,8 +475,123 @@ class PresolvepsilonOperationsSparse:
         zero_rows_sparse = np.where(A_norm.getnnz(axis=1) == 0)[0]
         print("Zero rows: ", len(zero_rows_sparse))
         self.A = A_norm
-        
+    
+    def improve_sparsity(self, epsilon=1e-6, delta = 0.9):   
+        """
+        Perform a sparsification operation on the model's sparse matrix `self.A`.
+        Elements in the matrix that are deemed insignificant (based on `epsilon`) 
+        will be set to zero, improving matrix sparsity.
 
+        Parameters:
+            epsilon (float): Threshold below which matrix elements are set to zero. Default is 1e-6.
+
+        Returns:
+            None: Updates `self.A` in-place as a sparse CSR matrix.
+        """
+        A_norm1, b_norm,  _ = normalize_features_sparse(self.A.copy(), self.b.copy())
+        num_rows, num_cols = A_norm1.shape
+        ub = np.array(self.ub)  # Upper bounds
+        lb = np.array(self.lb)  # Lower bounds
+
+        b_norm = np.array(b_norm)
+        A_norm = csr_matrix(self.A).copy()  # Sparse matrix in CSR format
+        #print("Non-zero elements in A_norm: ", A_norm.nonzero())
+
+        max_sparsification = A_norm1.copy()
+        data = max_sparsification.data
+        A_indices = max_sparsification.indices
+        A_indptr = max_sparsification.indptr
+
+        # Handle upper and lower bounds on non-zero elements
+        neg_mask = data < 0  # Mask for negative values
+        pos_mask = data > 0  # Mask for positive values
+
+        max_activity_data = np.zeros_like(data)
+        max_activity_data[neg_mask] = data[neg_mask] * ub[A_indices[neg_mask]]
+        max_activity_data[pos_mask] = data[pos_mask] * lb[A_indices[pos_mask]]
+
+        # Compute row sums
+        row_sums = np.add.reduceat(max_activity_data, A_indptr[:-1])
+
+        row_indices = np.repeat(np.arange(len(A_indptr) - 1), np.diff(A_indptr))
+        adjusted_data = row_sums[row_indices] - max_activity_data
+        delayed_sparsification = csr_matrix((adjusted_data, A_indices, A_indptr), shape=max_sparsification.shape)
+        # upper_bound_matrix = A_norm1.copy()  # Copy the structure of A_norm
+        # upper_bound_matrix.data[neg_mask] *= lb[A_norm.indices[neg_mask]]  # Multiply negative entries by lb
+        # upper_bound_matrix.data[pos_mask] *= ub[A_norm.indices[pos_mask]] # Multiply positive entries by ub. This two lines define a variable to be in its maximum value  
+        #print(max_activity_variable.toarray()) 
+        upper_bound_matrix = A_norm1.multiply(ub)
+        upper_bound_matrix = upper_bound_matrix.tocsr()  # Ensure CSR format for consistent indexing
+        max_activity_variable = delayed_sparsification
+        equal_sign = np.sign(max_activity_variable.data) == np.sign(upper_bound_matrix.data)
+
+        # Compute the epsilon matrix
+        epsilon_matrix = np.where(
+            (np.isfinite(max_activity_variable.data)) & (max_activity_variable.data != 0), #& (upper_bound_matrix.data != 0) & (np.isfinite(upper_bound_matrix.data)),
+            np.abs(upper_bound_matrix.data/ max_activity_variable.data),
+            np.inf
+            )
+
+        min_sparsification = A_norm1.copy()
+        min_activity_data = np.zeros_like(data)
+        min_activity_data[neg_mask] = data[neg_mask] * lb[A_indices[neg_mask]]
+        min_activity_data[pos_mask] = data[pos_mask] * ub[A_indices[pos_mask]]
+        row_sums = np.add.reduceat(min_activity_data, A_indptr[:-1])
+        adjusted_data_min = row_sums[row_indices] - min_activity_data
+        lower_bound_matrix = A_norm1.multiply(lb)
+        lower_bound_matrix.data[neg_mask] *= ub[A_norm.indices[neg_mask]]  # Multiply negative entries by lb
+        lower_bound_matrix.data[pos_mask] *= lb[A_norm.indices[pos_mask]] # Multiply positive entries by ub. This two lines define a variable to be in its maximum value 
+        min_activity_variable = csr_matrix((adjusted_data_min, A_indices, A_indptr), shape=min_sparsification.shape)
+        importance_matrix = np.where(min_activity_variable.data != 0, np.abs(lower_bound_matrix.data / min_activity_variable.data), 0)
+#         
+
+        condition_epsilon = epsilon_matrix < epsilon
+        condition_importance = importance_matrix > delta
+        # Identify the variables (columns) that meet the sparsification condition
+        # Get the row and column indices where epsilon and importance conditions are met
+        rows_epsilon, cols_epsilon = csr_matrix(condition_epsilon).nonzero()
+        rows_importance, cols_importance = csr_matrix(condition_importance).nonzero()
+
+        # Convert (row, column) pairs into sets for fast lookups
+        epsilon_dict = {}  # {col: set(rows)}
+        importance_dict = {}  # {col: set(rows)}
+        print(len(cols_epsilon), len(cols_importance))
+        # Efficiently store row indices per column for both conditions
+        for row, col in zip(rows_epsilon, cols_epsilon):
+            if col not in epsilon_dict:
+                epsilon_dict[col] = set()
+            epsilon_dict[col].add(row)
+
+        for row, col in zip(rows_importance, cols_importance):
+            if col not in importance_dict:
+                importance_dict[col] = set()
+            importance_dict[col].add(row)
+
+        # **Find columns where an epsilon-row has another row in the same column fulfilling importance**
+        columns_with_both_conditions = {
+            col for col in epsilon_dict if col in importance_dict
+        }
+        rows_to_delete = []
+        for col in columns_with_both_conditions:
+            # Append the element of the set
+            rows_to_delete.append(epsilon_dict[col].pop())
+        mask_rows_to_delete = np.zeros(num_rows, dtype=bool)
+        mask_rows_to_delete[rows_to_delete] = True
+        print("Rows to delete: ", len(rows_to_delete))
+        # Delay the elements that satisfies the epsilon condition
+        # self.A.data[condition_epsilon] = 0
+        # self.A.eliminate_zeros()
+        # rows_to_delete = np.array(rows_to_delete)
+        if len(rows_to_delete) > 0:
+            mask = np.ones(num_rows, dtype=bool)
+            mask = np.where(mask_rows_to_delete)[0]
+            A_norm = csr_matrix(spdiags(mask.astype(int), 0, num_rows, num_rows).dot(A_norm))
+            # Print number of elements that are zero in self.A
+            print("Number of zero elements in A: ", A_norm.nnz)
+        #     #self.b[rows_to_delete] = 0
+        
+        
+        
     def eliminate_zero_rows_operation_sparse(self, epsilon, norm_abs='euclidean'):
         """
         Eliminate rows in the matrix where the normalized row norm relative to the RHS vector
@@ -512,7 +629,7 @@ class PresolvepsilonOperationsSparse:
         if rows_to_delete:
             mask = np.ones(num_rows, dtype=bool)
             mask[rows_to_delete] = False
-            self.A = csr_matrix(spdiags(mask.astype(int), 0, num_rows, num_rows).dot(self.A))
+            self.A = csr_matrix(spdiags(mask.astype(int), 0, num_rows, num_rows).dot(self.A_norm))
             self.b[rows_to_delete] = 0
 
         # Store changes

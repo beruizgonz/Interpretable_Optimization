@@ -12,7 +12,7 @@ from opts import parse_opts
 from utils_models.presolvepsilon_class import PresolvepsilonOperations, PresolvepsilonOperationsSparse
 from utils_models.utils_functions import *
 from utils_models.standard_model import standard_form_e1, construct_dual_model_sparse
-from real_objective import set_real_objective
+# from real_objective import set_real_objective
  
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -34,7 +34,7 @@ real_model_path = os.path.join(real_data_path,  'openTEPES_EAPP_2030_sc01_st1.mp
 
 # PATH TO SAVE THE RESULTS
 results_folder = os.path.join(project_root, 'results_new/global/sparse/real_problems')
-sparsification_results = os.path.join(results_folder, 'sparsification')
+sparsification_results = os.path.join(results_folder, 'sparsification_improve')
 zeroepsilon_row_results = os.path.join(results_folder, 'epsilon_rows_norm')
 zeroepsilon_col_results = os.path.join(results_folder, 'epsilon_cols_norm')
 dependency_rows_results = os.path.join(results_folder, 'epsilon_dependency_rows')
@@ -83,7 +83,7 @@ def sensitivity_analysis(model, presolve, dual=False, min_threshold=0.0015, max_
     original_model = model.copy()
 
     # Extract model matrices and metadata
-    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model=original_model)
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model=original_model)
     A_initial = csr_matrix(A)
     total_non_zeros = A_initial.nnz
     print(f'Total non-zeros: {total_non_zeros}')
@@ -110,7 +110,7 @@ def sensitivity_analysis(model, presolve, dual=False, min_threshold=0.0015, max_
         print(f"Threshold: {threshold}")
 
         # Apply presolve operations
-        A_new, b_new, _, _, _, _, cons_senses_new, _, _, _, _ = presolve.orchestrator_presolve_operations(
+        A_new, b_new, _, _, _, _, cons_senses_new, _, _, _, _, _ = presolve.orchestrator_presolve_operations(
             model=original_model, epsilon=threshold
         )
         
@@ -188,18 +188,19 @@ def sensitivity_analysis_file(file, save_path, opts):
     original_primal = standard_form_e1(model)
     if opts.local_solution:
         lb, ub = set_new_bounds(original_primal, alpha_min=0.0001, alpha_max=1000)
-        A_sparse, b_sparse, c, co, _, _, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
+        A_sparse, b_sparse, c, co, _, _, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(original_primal)
     else:
     # Handle bounds
         if opts.read_bounds:
-            A_sparse, b_sparse, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(original_primal)
+            A_sparse, b_sparse, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(original_primal)
             json_bounds = os.path.join(project_root, 'data/bounds_trace', f'bound_trace_{model_name}.json')
             with open(json_bounds, 'r') as f:
                 data = json.load(f)
             last_iteration_index = len(data['iteration']) - 1
             lb, ub = data['lb'][last_iteration_index], data['ub'][last_iteration_index]
         else:
-            A_sparse, b_sparse, c, co, lb, ub, of_sense, cons_senses, variable_names = calculate_bounds_candidates_sparse(original_primal, None, model_name)
+            print('Calculating bounds...')
+            A_sparse, b_sparse, c, co, lb, ub, of_sense, cons_senses, variable_names = calculate_bounds_candidates_sparse_improve(original_primal, None, model_name)
 
     # Build model with bounds
     model_bounds = build_model(A_sparse, b_sparse, c, co, lb, ub, of_sense, cons_senses, variable_names)
@@ -301,7 +302,7 @@ if __name__ == '__main__':
     # opts.operate_epsilon_rows = True
     # opts.operate_epsilon_cols = False
     # sensitivity_analysis_file(model_path_modified, save_path = prueba, opts = opts)
-    print('CHANGE TO COLUMNS')
+    print('CHANGE TO SPARSIFICATION')
     opts.operate_epsilon_cols = False
     opts.operate_epsilon_rows = False   
     opts.sparsification = True

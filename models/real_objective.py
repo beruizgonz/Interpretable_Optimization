@@ -3,9 +3,8 @@ import os
 import gurobipy as gp
 import numpy as np 
 
-from utils_models.utils_functions import * 
-from utils_models.standard_model import *
-
+from .utils_models.utils_functions import * 
+from .utils_models.standard_model import *
 
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -16,7 +15,6 @@ model_file = os.path.join(project_root, 'data/real_data/openTEPES_9n_2030_sc01_s
 
 GAMS_path = os.path.join(project_root, 'data/GAMS_library')    
 real_data_path = os.path.join(project_root, 'data/real_data_new')
-import gurobipy as gp
 
 def set_real_objective(model):
     """
@@ -133,7 +131,7 @@ if __name__ == '__main__':
     model_new.setParam('OutputFlag', 0)
     # model_new.optimize()
     # print(model_new.ObjVal)
-    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model_new)
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model_new)
     # Get the values of c where it is non-zero
     c = np.array(c)
     b = np.array(b)
