@@ -9,6 +9,7 @@ import plotly.graph_objects as go
 import plotly.io as pio
 
 from description_open_TEPES import *
+from marginal_values_open_TEPES import *
 
 # PATH TO THE DATA
 parent_path = os.path.dirname(os.getcwd())
@@ -26,7 +27,7 @@ open_tepes_9n = os.path.join(real_data_path, 'openTEPES_EAPP_2030_sc01_st1.mps')
 
 # Go to the modification presolve files
 results_folder = os.path.join(parent_path, 'results_new/marginal_values/real_problems')
-results_simplified_constraints = os.path.join(results_folder, 'simplified_constraints_percentage/openTEPES_EAPP_2030_sc01_st1_constraints.json')
+results_simplified_constraints = os.path.join(results_folder, 'simplified_constraints_epsilon/importance_openTEPES_EAPP_2030_sc01_st1_constraints.json')
 results_simplified_variables = os.path.join(results_folder, 'simplified_variables_percentage/openTEPES_EAPP_2030_sc01_st1_variables.json')
 
 # Save paths 
@@ -59,6 +60,37 @@ def remove_by_group(model, percentage, names_remove, entity_type = 'constraints'
         group_remove[group] += 1
     return asosiations, group_remove 
 
+def remove_group(model, group, entity_type):
+    # Remove all the constraints or variables of the group
+    if entity_type == 'constraints':
+        names, asosiations, groups, inverted_groups = groups_by_constraints(model)
+    elif entity_type == 'variables':
+        names, asosiations, groups, inverted_groups = groups_by_variables(model)
+    for name in groups[group]:
+        model.remove(model.getConstrByName(name))
+    return model
+
+def remove_all_groups(model, names_remove, min_threshold, max_threshold, step, entity_type = 'constraints',  save_path = None):
+    if entity_type == 'constraints':
+        importance_constrs, constrs_names = constraints_importance(model)
+        group_imp = importances_by_groups(importance_constrs, constrs_names, model, 'constraints')
+    elif entity_type == 'variables':
+        importance_vars, vars_names = variables_importance(model)
+        group_imp = importances_by_groups(importance_vars, vars_names, model, 'variables')
+    thresholds = []
+    threshold = min_threshold
+    while threshold <= max_threshold:
+        thresholds.append(threshold)
+        threshold += step+threshold
+    thresholds = np.array(thresholds)
+    simplified_model = model.copy()
+    for threshold in thresholds:
+        associated_constraints, group_remove = remove_by_group(simplified_model, threshold, names_remove, entity_type)
+        for group in group_remove.keys():
+            if group_remove[group] > group_imp[group]:
+                remove_group(simplified_model, group, entity_type)
+    return asosiations, group_remove
+
 def plot_changes_histogram_with_slider(model):
     """
     Interactive plot with a slider to dynamically update plots based on EPSILON_NUMBER.
@@ -89,7 +121,7 @@ def plot_changes_histogram_with_slider(model):
         (change / total * 100 if total > 0 else 0)
         for change, total in zip(change_heights_constraints, total_heights_constraints)
     ]
-
+    
     # Plot bars
     bar_total_constraints = plt.bar(x_constraints, total_heights_constraints, color="blue", alpha=0.5, label="Total Constraints")
     bar_changed_constraints = plt.bar(x_constraints, change_heights_constraints, color="red", alpha=0.7, label="Changed Constraints")
@@ -175,7 +207,7 @@ def plot_changes_histogram_with_slider(model):
     plt.show()
 
 
-def plot_changes_histogram_html(model, json_file, e_type, save_path  = None):
+def plot_changes_histogram_html(model, json_file, e_type, importance_by_group, save_path  = None):
     """
     Creates an interactive bar chart with a slider using Plotly and saves it as an HTML file.
 
@@ -192,6 +224,10 @@ def plot_changes_histogram_html(model, json_file, e_type, save_path  = None):
 
     groups_constraints = list(total_constraints.keys())
     groups_constraints.sort()
+    # Order groups by importance of importance_by_group
+    groups_constraints = sorted(groups_constraints, key=lambda g: importance_by_group.get(g, 0), reverse=True)
+    # order by groups with the highest changes
+    #groups_constraints = sorted(groups_constraints, key=lambda g: group_remove.get(g, 0), reverse=True)
 
     # Create lists to store total and changed constraints per percentage
     total_heights_constraints = []
@@ -203,6 +239,13 @@ def plot_changes_histogram_html(model, json_file, e_type, save_path  = None):
         
         total_heights_constraints.append([total_constraints[group] for group in groups_constraints])
         change_heights_constraints.append([group_remove.get(group, 0) for group in groups_constraints])
+
+    # Compute total changes per group across all percentage levels
+    # Use only the first percentage (index 0) for sorting
+#     first_percentage_changes = change_heights_constraints[0]  # Take first percentage changes
+
+# # Sort groups based on the number of changes in the first percentage (descending)
+#     groups_constraints = sorted(groups_constraints, key=lambda g: first_percentage_changes[groups_constraints.index(g)], reverse=True)
 
     # Initialize figure
     fig = go.Figure()
@@ -341,8 +384,11 @@ def plot_changes_histogram_html(model, json_file, e_type, save_path  = None):
 if __name__ == '__main__': 
     p, obj_values, names_remove = read_json(results_simplified_constraints)
     model = gp.read(open_tepes_9n)
-    model = standard_form_e1(model)
+    model = standard_form_e2(model)
+    model = normalize_variables(model)
     #remove_by_group(model, 0, obj_values, names_remove, entity_type = 'constraints')
     # plot_changes_histogram_with_slider(model)
-    plot_changes_histogram_html(model, results_simplified_constraints, 'constraints', real_problems)
-    plot_changes_histogram_html(model, results_simplified_variables, 'variables', real_problems)
+    importance_constrs, constrs_names = constraints_importance(model)
+    group_imp_constr = importances_by_groups(importance_constrs, constrs_names, model, 'constraints')
+    plot_changes_histogram_html(model, results_simplified_constraints, 'constraints', group_imp_constr,  real_problems)
+    #plot_changes_histogram_html(model, results_simplified_variables, 'variables', real_problems)

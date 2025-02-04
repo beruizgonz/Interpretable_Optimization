@@ -32,8 +32,8 @@ save_simplified_importance_variables = os.path.join(marginal_values, 'simplified
 save_pareto_variables_importance = os.path.join(marginal_values, 'pareto_variables_importance')
 save_pareto_constraints = os.path.join(marginal_values, 'pareto_constraints')
 save_pareto_variables = os.path.join(marginal_values, 'pareto_variables')
-save_folder_variables = os.path.join(results_folder, 'marginal_values/real_problems/simplified_variables_percentil')
-save_folder_constraints = os.path.join(results_folder, 'marginal_values/real_problems/simplified_constraints_percentil')
+save_folder_variables = os.path.join(results_folder, 'marginal_values/real_problems/simplified_variables_percentage')
+save_folder_constraints = os.path.join(results_folder, 'marginal_values/real_problems/simplified_constraints_epsilon')
 
 # PARAMETERS FOR THE ANALYSIS
 PERCENTILE_MIN_V= 0
@@ -61,6 +61,29 @@ def get_marginal_values(model):
     marginal_constraints = list(model.getAttr('Pi', model.getConstrs()))
     variables = [var.X for var in model.getVars()]
     return model.ObjVal, variables, marginal_variables, marginal_constraints
+
+def get_importance_values(model):
+    """
+    Parameters:
+    - model: Gurobi model object.
+    Returns:
+    - objective_value: Objective value of the model.
+    - marginal_variables: List of reduced costs (marginal values) corresponding to each variable in the model.
+    - marginal_constraints: List of shadow prices (marginal values) corresponding to each constraint in the model.
+    """
+    model.setParam('OutputFlag', 0)
+    model.optimize()
+    marginal_variables = list(model.getAttr('RC', model.getVars()))
+    marginal_constraints = list(model.getAttr('Pi', model.getConstrs()))
+    solution = [var.X for var in model.getVars()]
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constrs_names = get_model_matrices(model)
+    constraints_values = A.dot(solution)
+    marginal_constraints = np.array(marginal_constraints)
+    importance_constrs = np.abs(constraints_values * marginal_constraints)
+
+    c = np.array(c)
+    importance_vars = np.abs(c - A.T.dot(marginal_constraints).flatten()*(solution))
+    return model.ObjVal, importance_vars, importance_constrs
 
 def get_values_constraints(model):
     """
@@ -148,7 +171,6 @@ def marginal_values_histogram(model, name, save_path, data_type='constraints'):
     plt.savefig(save_in)
     plt.close()
 
-
 def marginal_values_handler(model, values, names, percentile, entity_type='constraints', type_simplyfied='Percentile'):
     """
     Simplifies the Gurobi model by removing constraints or variables based on a specified percentile.
@@ -197,7 +219,7 @@ def marginal_values_handler(model, values, names, percentile, entity_type='const
                 simplified_model.remove(simplified_model.getVarByName(name))
             elif entity_type == 'importance_variables' and value <= threshold:
                 simplified_model.remove(simplified_model.getVarByName(name))
-    elif type_simplyfied == 'Percentages':
+    elif type_simplyfied == 'Percentage':
         # order the values from the smallest to the largest
         order = np.argsort(abs_values)
         # The way of simplifying is to delete the % with the smallest values
@@ -206,11 +228,25 @@ def marginal_values_handler(model, values, names, percentile, entity_type='const
                 simplified_model.remove(simplified_model.getConstrByName(names[order[i]]))
                 get_remove_name.append(names[order[i]])
             elif entity_type == 'variables':
-                order = order[::-1]
+                #order = order[::-1]
                 simplified_model.remove(simplified_model.getVarByName(names[order[i]]))
                 get_remove_name.append(names[order[i]])
             elif entity_type == 'importance_variables':
                 simplified_model.remove(simplified_model.getVarByName(names[order[i]]))
+    elif type_simplyfied == 'Epsilon':
+        order = np.argsort(abs_values)
+        # Delay the values that are less than epsilon
+        for i in range(len(order)):
+            if abs_values[order[i]] < percentile:
+                if entity_type == 'constraints':
+                    simplified_model.remove(simplified_model.getConstrByName(names[order[i]]))
+                    get_remove_name.append(names[order[i]])
+                elif entity_type == 'variables':
+                    simplified_model.remove(simplified_model.getVarByName(names[order[i]]))
+                    get_remove_name.append(names[order[i]])
+                elif entity_type == 'importance_variables':
+                    simplified_model.remove(simplified_model.getVarByName(names[order[i]]))
+
     simplified_model.update()
 
     simplified_model.setParam('OutputFlag', 0)
@@ -228,7 +264,7 @@ def marginal_values_handler(model, values, names, percentile, entity_type='const
 
     return num_entities_after, objective_value, simplified_model, get_remove_name
 
-def main_marginal_values_handler(model, model_name, save_folder, min_threshold, max_threshold, step, save_result = True, entity_type='constraints', type_simplyfied='Percentile'):
+def main_marginal_values_handler(model, model_name, save_folder, min_threshold, max_threshold, step, metric = 'importance', save_result = True, entity_type='constraints', type_simplyfied='Percentile'):
     """
     Iterates over thresholds to analyze the effect of removing constraints or variables based on marginal values.
 
@@ -244,9 +280,12 @@ def main_marginal_values_handler(model, model_name, save_folder, min_threshold, 
     - num_entities: List of remaining constraints or variables at each threshold.
     - objective_values: List of objective values at each threshold.
     """
-    obj,_, m_variables, m_constraints = get_marginal_values(model)
+    if metric =='marginal':
+        obj,_, m_variables, m_constraints = get_marginal_values(model)
+    elif metric == 'importance':
+        _, m_variables, m_constraints = get_importance_values(model)
     if entity_type == 'constraints':
-        # For constraints, return shadow prices and constraint names
+        # For constraints, return shadow prices and constrain)t names
         values = m_constraints
         names = [constr.ConstrName for constr in model.getConstrs()]
     elif entity_type == 'variables':
@@ -256,21 +295,30 @@ def main_marginal_values_handler(model, model_name, save_folder, min_threshold, 
     elif entity_type == 'importance_variables': 
         values = importance_variables(model, m_variables, m_constraints)
         names = [var.VarName for var in model.getVars()]
-
-    thresholds = np.arange(min_threshold, max_threshold, step)[::-1]
+    if type_simplyfied == 'Epsilon':
+        thresholds = []
+        threshold = min_threshold
+        while threshold < max_threshold:
+            thresholds.append(threshold)
+            threshold += threshold* step
+            thresholds.append(threshold)
+        thresholds = np.array(thresholds)
+    else: 
+        thresholds = np.arange(min_threshold, max_threshold, step)
     num_entities = []
     objective_values = []
     names_remove = []
     for threshold in thresholds:
+        print(f'Processing threshold: {threshold}')
         num, obj_value, _, name = marginal_values_handler(model, values, names, threshold, entity_type, type_simplyfied)
         num_entities.append(num)
         objective_values.append(obj_value)
         names_remove.append(name)
 
-    results = {'thresholds': thresholds[::-1], 'num_entities': num_entities[::-1], 'objective_values': objective_values[::-1], 'names_remove': names_remove[::-1]}  
+    results = {'thresholds': thresholds, 'num_entities': num_entities, 'objective_values': objective_values, 'names_remove': names_remove}  
     if save_result: 
         # Save the results in a json file   
-        save_path = os.path.join(save_folder, f'{model_name}_{entity_type}.json')
+        save_path = os.path.join(save_folder, f'{metric}_{model_name}_{entity_type}.json')
         dict2json(results, save_path)
     return thresholds, num_entities, objective_values
 
@@ -301,7 +349,7 @@ def test_marginal_variables(model):
     print(first_variables)
 
 def compared_importance_marginal_variables(model):
-    standard_model = standard_form_e1(model)
+    standard_model = standard_form_e2(model)
     obj, m_variables, m_constraints = get_marginal_values(standard_model)
     importance = importance_variables(standard_model, m_variables, m_constraints)
     vbasis = standard_model.getAttr("VBasis")  # Get the basis status for all variables
@@ -341,12 +389,13 @@ if __name__ == '__main__':
     model = gp.read(real_model_path)
     model_name = real_model_path.split('/')[-1].split('.')[0]
     print(model_name)
-    model = standard_form_e1(model)
+    model = standard_form_e2(model)
+    model = normalize_variables(model)
     model.setParam('OutputFlag', 0)
-    thres, num, obj = main_marginal_values_handler(model, model_name,  save_folder_variables, PERCENTILE_MIN_V, PERCENTILE_MAX_V, STEP_V, True, 'variables', 'Percelntil')
+    thres, num, obj = main_marginal_values_handler(model, model_name, save_folder_variables, 0.000015, 0.0003, 0.2, 'importance', True, 'variables', 'Epsilon')
     #plot_results(thres, obj, num, 'openTEPES_EAPP_2030_sc01_st1', save_simplified_variables, 'variables')
     print(os.path.exists(save_simplified_constraints))
-    thres, num, obj = main_marginal_values_handler(model, model_name, save_folder_constraints, PERCENTILE_MIN_C, PERCENTILE_MAX_C, STEP_C, True, 'constraints', 'Percentil')
+    thres, num, obj = main_marginal_values_handler(model, model_name, save_folder_constraints, 0.0015, 0.03, 0.2, 'importance',True, 'constraints', 'Epsilon')
     #plot_results(thres, obj, num, 'openTEPES_EAPP_2030_sc01_st1', save_simplified_constraints, 'constraints')
     # obj, variables, m_variables, m_constraints = get_marginal_values(model)
     # importance = importance_variables(model, variables, m_constraints)

@@ -2899,3 +2899,106 @@ def set_new_bounds(model, alpha_min, alpha_max):
     lower_bounds = [var.lb for var in model.getVars()]
     upper_bounds = [var.ub for var in model.getVars()]
     return lower_bounds, upper_bounds
+
+def normalize_variables(model, alpha_min=0.1, alpha_max=10):
+    """
+    Normalize the variables of a Gurobi model to the range [0, 1].
+    """
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = calculate_bounds_candidates_sparse(model, None, None)
+    model.setParam('OutputFlag', 0)
+    model.optimize()
+    print('Model optimized: ', model.objVal)
+    if model.Status != gp.GRB.OPTIMAL:
+        raise ValueError("Model optimization failed or is not optimal.")
+
+    optimal_vars = [var.X for var in model.getVars()]
+    # print the min lb and max ub
+    lb = np.array(lb)   
+    ub = np.array(ub)
+
+    for i, name in enumerate(variable_names):
+        if np.isinf(ub[i]) or  lb[i] == ub[i]:
+            var_optimal = optimal_vars[i]
+            if var_optimal is not None:
+                if var_optimal > 0:
+                    lb[i] = var_optimal * alpha_min
+                    ub[i] = var_optimal * alpha_max
+                else:
+                    lb[i] = var_optimal * alpha_max
+                    ub[i] = var_optimal * alpha_min
+                    
+        if lb[i] == 0 and ub[i] == 0 or (ub[i]-lb[i]) <= 1e-6:
+            lb[i] = 0
+            ub[i] = alpha_max
+
+    # Check that all the bounds are finite and valid
+    if not np.all(np.isfinite(lb)) or not np.all(np.isfinite(ub)):
+        raise ValueError("Invalid bounds detected.")
+    constraint_names = [constr.ConstrName for constr in model.getConstrs()]
+    model_bounds = build_model(A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names)
+    normalized_model = gp.Model("normalized_model")
+    scaling_factors = {}
+    normalized_vars = {}
+    original_to_normalized = {}
+
+    for i, name in enumerate(variable_names):
+        if not (np.isfinite(lb[i]) and np.isfinite(ub[i])):
+            raise ValueError(f"Variable {name} has invalid bounds: LB={lb[i]}, UB={ub[i]}")
+        if lb[i] >= ub[i]:
+            print(optimal_vars[i])
+            raise ValueError(f"Variable {name} has invalid bounds: LB={lb[i]} >= UB={ub[i]}")
+
+
+    for i, var in enumerate(model_bounds.getVars()):
+        lower_bound = lb[i]
+        upper_bound = ub[i]
+        scale = upper_bound - lower_bound
+        if scale == 'inf' or scale == '-inf' or scale == 0:
+            raise ValueError(f"Variable {var.VarName} has invalid bounds: LB={lower_bound}, UB={upper_bound}.")
+
+        scaling_factors[var] = (lower_bound, scale)
+        norm_var = normalized_model.addVar(lb=0, ub=1, name=f"{var.VarName}")
+        normalized_vars[var] = norm_var
+        original_to_normalized[var.VarName] = norm_var
+
+    normalized_model.update()
+
+    old_obj = model_bounds.getObjective()
+    new_obj = gp.LinExpr()
+
+    for i in range(old_obj.size()):
+        var = old_obj.getVar(i)
+        if var not in scaling_factors:
+            raise ValueError(f"Variable {var.VarName} not found in scaling_factors.")
+        coeff = old_obj.getCoeff(i)
+        lower_bound, scale = scaling_factors[var]
+        new_obj += coeff * (scale * normalized_vars[var] + lower_bound)
+
+    if model_bounds.ModelSense == gp.GRB.MINIMIZE:
+        normalized_model.setObjective(new_obj, gp.GRB.MINIMIZE)
+    else:
+        normalized_model.setObjective(new_obj, gp.GRB.MAXIMIZE)
+
+    # # Step 6: Add normalized constraints
+    for constr in model_bounds.getConstrs():
+        lhs = model_bounds.getRow(constr)
+        rhs = constr.RHS
+        sense = constr.Sense
+
+        new_lhs = gp.LinExpr()
+        for j in range(lhs.size()):
+            var = lhs.getVar(j)
+            coeff = lhs.getCoeff(j)
+            lower_bound, scale = scaling_factors[var]
+            new_lhs += coeff * (scale * normalized_vars[var] + lower_bound)
+
+        # Add the constraint to the normalized model
+        if sense == gp.GRB.LESS_EQUAL:
+            normalized_model.addConstr(new_lhs <= rhs, name=constr.ConstrName)
+        elif sense == gp.GRB.GREATER_EQUAL:
+            normalized_model.addConstr(new_lhs >= rhs, name=constr.ConstrName)
+        elif sense == gp.GRB.EQUAL:
+            normalized_model.addConstr(new_lhs == rhs, name=constr.ConstrName)
+
+    normalized_model.update()
+    return normalized_model

@@ -11,7 +11,7 @@ from scipy.sparse import coo_matrix, csr_matrix
 from opts import parse_opts
 from utils_models.presolvepsilon_class import PresolvepsilonOperations, PresolvepsilonOperationsSparse
 from utils_models.utils_functions import *
-from utils_models.standard_model import standard_form_e1, construct_dual_model_sparse
+from utils_models.standard_model import standard_form_e1, standard_form_e2, construct_dual_model_sparse
 # from real_objective import set_real_objective
  
 logging.basicConfig()
@@ -185,7 +185,7 @@ def sensitivity_analysis_file(file, save_path, opts):
     model_name = os.path.splitext(os.path.basename(file))[0]
 
     # Convert the model to standard form
-    original_primal = standard_form_e1(model)
+    original_primal = standard_form_e2(model)
     if opts.local_solution:
         lb, ub = set_new_bounds(original_primal, alpha_min=0.0001, alpha_max=1000)
         A_sparse, b_sparse, c, co, _, _, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(original_primal)

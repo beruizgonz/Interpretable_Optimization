@@ -476,7 +476,7 @@ class PresolvepsilonOperationsSparse:
         print("Zero rows: ", len(zero_rows_sparse))
         self.A = A_norm
     
-    def improve_sparsity(self, epsilon=1e-6, delta = 0.9):   
+    def improve_sparsity(self, epsilon=1e-6, delta = 0.3):   
         """
         Perform a sparsification operation on the model's sparse matrix `self.A`.
         Elements in the matrix that are deemed insignificant (based on `epsilon`) 
@@ -492,7 +492,7 @@ class PresolvepsilonOperationsSparse:
         num_rows, num_cols = A_norm1.shape
         ub = np.array(self.ub)  # Upper bounds
         lb = np.array(self.lb)  # Lower bounds
-
+        print(len(np.where(lb == 0) [0]))
         b_norm = np.array(b_norm)
         A_norm = csr_matrix(self.A).copy()  # Sparse matrix in CSR format
         #print("Non-zero elements in A_norm: ", A_norm.nonzero())
@@ -539,12 +539,13 @@ class PresolvepsilonOperationsSparse:
         row_sums = np.add.reduceat(min_activity_data, A_indptr[:-1])
         adjusted_data_min = row_sums[row_indices] - min_activity_data
         lower_bound_matrix = A_norm1.multiply(lb)
-        lower_bound_matrix.data[neg_mask] *= ub[A_norm.indices[neg_mask]]  # Multiply negative entries by lb
-        lower_bound_matrix.data[pos_mask] *= lb[A_norm.indices[pos_mask]] # Multiply positive entries by ub. This two lines define a variable to be in its maximum value 
+        # lower_bound_matrix.data[neg_mask] *= ub[A_norm.indices[neg_mask]]  # Multiply negative entries by lb
+        # lower_bound_matrix.data[pos_mask] *= lb[A_norm.indices[pos_mask]] # Multiply positive entries by ub. This two lines define a variable to be in its maximum value 
         min_activity_variable = csr_matrix((adjusted_data_min, A_indices, A_indptr), shape=min_sparsification.shape)
         importance_matrix = np.where(min_activity_variable.data != 0, np.abs(lower_bound_matrix.data / min_activity_variable.data), 0)
 #         
-
+        # Count the number of zero elements in importance_matrix
+        print("Number of zero elements in importance_matrix: ", np.sum(importance_matrix == 0))
         condition_epsilon = epsilon_matrix < epsilon
         condition_importance = importance_matrix > delta
         # Identify the variables (columns) that meet the sparsification condition
@@ -571,27 +572,30 @@ class PresolvepsilonOperationsSparse:
         columns_with_both_conditions = {
             col for col in epsilon_dict if col in importance_dict
         }
-        rows_to_delete = []
+        rows_to_delete = set()  # Ensures uniqueness
+
         for col in columns_with_both_conditions:
-            # Append the element of the set
-            rows_to_delete.append(epsilon_dict[col].pop())
-        mask_rows_to_delete = np.zeros(num_rows, dtype=bool)
-        mask_rows_to_delete[rows_to_delete] = True
-        print("Rows to delete: ", len(rows_to_delete))
-        # Delay the elements that satisfies the epsilon condition
-        # self.A.data[condition_epsilon] = 0
-        # self.A.eliminate_zeros()
-        # rows_to_delete = np.array(rows_to_delete)
+            if epsilon_dict[col]:  # Ensure it's not empty before popping
+                rows_to_delete.add(epsilon_dict[col].pop())  
+
+        rows_to_delete = list(rows_to_delete)
+        mask_rows_to_delete = np.ones(num_rows, dtype=bool)
+        mask_rows_to_delete[rows_to_delete] = False
+        # Convert the elements of rows_to_delete to integers
+        rows_to_delete = list(map(int, rows_to_delete))
+        print(rows_to_delete)
+        print("Rows to delete: ",  np.sum(mask_rows_to_delete))
+        print(rows_to_delete)
+        self.b = np.array(self.b)
         if len(rows_to_delete) > 0:
-            mask = np.ones(num_rows, dtype=bool)
-            mask = np.where(mask_rows_to_delete)[0]
+            mask = mask_rows_to_delete
+            # Number of true values in the mask
+            print("Number of true values in the mask: ", np.sum(mask))
             A_norm = csr_matrix(spdiags(mask.astype(int), 0, num_rows, num_rows).dot(A_norm))
-            # Print number of elements that are zero in self.A
-            print("Number of zero elements in A: ", A_norm.nnz)
-        #     #self.b[rows_to_delete] = 0
+            self.b[rows_to_delete] = 0
+        self.A = A_norm
         
-        
-        
+            
     def eliminate_zero_rows_operation_sparse(self, epsilon, norm_abs='euclidean'):
         """
         Eliminate rows in the matrix where the normalized row norm relative to the RHS vector
