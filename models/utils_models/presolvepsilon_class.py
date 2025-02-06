@@ -12,9 +12,9 @@ import os
 from scipy.sparse import coo_matrix, csr_matrix, lil_matrix
 from scipy.linalg import qr
 
-# logging.basicConfig()
-# log = logging.getLogger(__name__)
-# log.setLevel('INFO')
+def flexibility_constraints(model, vars_remove, importance):
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = get_model_matrices(model)
+
 
 
 class PresolvepsilonOperations:
@@ -469,7 +469,7 @@ class PresolvepsilonOperationsSparse:
         # By row # Calculate the number of elements in each row that are set to zero
         # Difference between the number of non-zero elements before and after sparsification by row
         row_diff = np.diff(A_norm.indptr)
-        print(row_diff  )
+        print(row_diff)
         # Get the rows where all the elements are zero
         # Convert to array to avoid issues with sparse matrices
         zero_rows_sparse = np.where(A_norm.getnnz(axis=1) == 0)[0]
@@ -548,12 +548,8 @@ class PresolvepsilonOperationsSparse:
         print("Number of zero elements in importance_matrix: ", np.sum(importance_matrix == 0))
         condition_epsilon = epsilon_matrix < epsilon
         condition_importance = importance_matrix > delta
-        # Identify the variables (columns) that meet the sparsification condition
-        # Get the row and column indices where epsilon and importance conditions are met
         rows_epsilon, cols_epsilon = csr_matrix(condition_epsilon).nonzero()
         rows_importance, cols_importance = csr_matrix(condition_importance).nonzero()
-
-        # Convert (row, column) pairs into sets for fast lookups
         epsilon_dict = {}  # {col: set(rows)}
         importance_dict = {}  # {col: set(rows)}
         print(len(cols_epsilon), len(cols_importance))
@@ -567,13 +563,14 @@ class PresolvepsilonOperationsSparse:
             if col not in importance_dict:
                 importance_dict[col] = set()
             importance_dict[col].add(row)
-
-        # **Find columns where an epsilon-row has another row in the same column fulfilling importance**
+        # Find columns where an epsilon-row has another row in the same column fulfilling importance**
         columns_with_both_conditions = {
             col for col in epsilon_dict if col in importance_dict
         }
         rows_to_delete = set()  # Ensures uniqueness
-
+        columns_only_epsilon = epsilon_dict.keys() - columns_with_both_conditions
+        print('Both condition', len(columns_with_both_conditions))
+        print(len(columns_only_epsilon))
         for col in columns_with_both_conditions:
             if epsilon_dict[col]:  # Ensure it's not empty before popping
                 rows_to_delete.add(epsilon_dict[col].pop())  
@@ -581,11 +578,7 @@ class PresolvepsilonOperationsSparse:
         rows_to_delete = list(rows_to_delete)
         mask_rows_to_delete = np.ones(num_rows, dtype=bool)
         mask_rows_to_delete[rows_to_delete] = False
-        # Convert the elements of rows_to_delete to integers
         rows_to_delete = list(map(int, rows_to_delete))
-        print(rows_to_delete)
-        print("Rows to delete: ",  np.sum(mask_rows_to_delete))
-        print(rows_to_delete)
         self.b = np.array(self.b)
         if len(rows_to_delete) > 0:
             mask = mask_rows_to_delete
@@ -593,9 +586,8 @@ class PresolvepsilonOperationsSparse:
             print("Number of true values in the mask: ", np.sum(mask))
             A_norm = csr_matrix(spdiags(mask.astype(int), 0, num_rows, num_rows).dot(A_norm))
             self.b[rows_to_delete] = 0
-        self.A = A_norm
+        #self.A = A_norm
         
-            
     def eliminate_zero_rows_operation_sparse(self, epsilon, norm_abs='euclidean'):
         """
         Eliminate rows in the matrix where the normalized row norm relative to the RHS vector

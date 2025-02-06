@@ -71,6 +71,7 @@ def get_importance_values(model):
     - marginal_variables: List of reduced costs (marginal values) corresponding to each variable in the model.
     - marginal_constraints: List of shadow prices (marginal values) corresponding to each constraint in the model.
     """
+    model = normalize_variables(model)
     model.setParam('OutputFlag', 0)
     model.optimize()
     marginal_variables = list(model.getAttr('RC', model.getVars()))
@@ -82,7 +83,7 @@ def get_importance_values(model):
     importance_constrs = np.abs(constraints_values * marginal_constraints)
 
     c = np.array(c)
-    importance_vars = np.abs(c - A.T.dot(marginal_constraints).flatten()*(solution))
+    importance_vars = np.abs(c - A.T.dot(marginal_constraints).flatten())
     return model.ObjVal, importance_vars, importance_constrs
 
 def get_values_constraints(model):
@@ -171,6 +172,89 @@ def marginal_values_histogram(model, name, save_path, data_type='constraints'):
     plt.savefig(save_in)
     plt.close()
 
+
+def remove_variables_flexibility(model, values, names, percentile, metric = 'Percentage'): 
+    """
+    Remove variables with marginal values below a specified percentile.
+    Also, determine which constraints involve these variables.
+    """
+    # Extract model matrices
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constrs_names = get_model_matrices(model)
+
+    # Ensure values and names match in length
+    if len(values) != len(names):
+        raise ValueError(f"Length mismatch: values ({len(values)}) and names ({len(names)})")
+
+    if metric == 'Percentage':
+        abs_values = np.abs(values)
+        # Sort the values in ascending order
+        order = np.argsort(abs_values)
+        # The way of simplifying is to delete the % with the smallest values
+        variables_to_remove = []
+        constrs_to_remove = []
+        var_indices_to_remove = []
+        for i in range(int(len(order)*percentile/100)):
+            variables_to_remove.append(names[order[i]])
+            var_indices_to_remove.append(order[i])
+    elif metric == 'Epsilon':
+        # Identify variables to remove based on threshold
+        abs_values = np.abs(values)
+        mask = abs_values < percentile
+        variables_to_remove = np.array(names)[mask].tolist()
+
+        # Get indices of variables to remove
+        var_indices_to_remove = np.where(mask)[0]
+
+        if len(var_indices_to_remove) == 0:
+            print("No variables to remove.")
+            return [], []  # Early exit if no variables meet the criteria
+
+    # Ensure A has the correct shape
+    if A.shape[1] != len(names):
+        raise ValueError(f"Matrix A column size ({A.shape[1]}) does not match names length ({len(names)})")
+    min_max_indices = {}  # Dictionary to track min/max indices for each row
+    # Efficient constraint removal using sparse operations
+    constraints_to_remove = {}
+    if issparse(A):  
+        A = A.tocsc()  # Convert to CSC for fast column slicing
+        var_indices_to_remove = np.array(var_indices_to_remove, dtype=int)
+        affected_rows = A[:, var_indices_to_remove].nonzero()[0]  
+        row_indices, col_indices = A[:, var_indices_to_remove].nonzero()
+        
+        # Create a dictionary to track min/max for each row
+        for row, col in zip(row_indices, col_indices):
+            constr_name = constrs_names[row]
+            actual_col = var_indices_to_remove[col]  # Map to original indices
+            if row not in min_max_indices:
+                min_max_indices[constr_name] = [actual_col, actual_col]  # Initialize (min, max)
+            else:
+                min_max_indices[constr_name][0] = min(min_max_indices[row][0], actual_col)  # Update min
+                min_max_indices[constr_name][1] = max(min_max_indices[row][1], actual_col)  # Update max
+
+    else:  # Dense matrix case
+        constraints_to_remove = np.where(np.any(A[:, var_indices_to_remove] != 0, axis=1))[0]
+    # Remove the variables from the model
+  # Remove variables efficiently in bulk
+    print(f"Removing {len(variables_to_remove)} variables from the model.")
+    model.remove([model.getVarByName(var_name) for var_name in variables_to_remove])
+    model.update()
+
+    # Update constraint senses based on min/max index
+    for constr_name, (min_idx, max_idx) in min_max_indices.items():
+        constr = model.getConstrByName(constr_name)
+        abs_min, abs_max = abs(min_idx), abs(max_idx)
+        if min_idx < 0 and abs_min > abs_max:
+            constr.Sense = 'G'  # Greater than or equal
+        elif max_idx > 0 and abs_max > abs_min:
+            constr.Sense = 'L'  # Less than or equal
+        elif abs_min == abs_max:
+            constr.Sense = 'L'  # Less than or equal
+        else:
+            constr.Sense = 'E'  # Equality
+
+    model.update()
+    return model, variables_to_remove
+
 def marginal_values_handler(model, values, names, percentile, entity_type='constraints', type_simplyfied='Percentile'):
     """
     Simplifies the Gurobi model by removing constraints or variables based on a specified percentile.
@@ -223,35 +307,41 @@ def marginal_values_handler(model, values, names, percentile, entity_type='const
         # order the values from the smallest to the largest
         order = np.argsort(abs_values)
         # The way of simplifying is to delete the % with the smallest values
-        for i in range(int(len(order)*percentile/100)):
-            if entity_type == 'constraints':
-                simplified_model.remove(simplified_model.getConstrByName(names[order[i]]))
-                get_remove_name.append(names[order[i]])
-            elif entity_type == 'variables':
-                #order = order[::-1]
-                simplified_model.remove(simplified_model.getVarByName(names[order[i]]))
-                get_remove_name.append(names[order[i]])
-            elif entity_type == 'importance_variables':
-                simplified_model.remove(simplified_model.getVarByName(names[order[i]]))
+       
+        if entity_type == 'constraints':
+                for i in range(int(len(order)*percentile/100)):
+                    simplified_model.remove(simplified_model.getConstrByName(names[order[i]]))
+                    get_remove_name.append(names[order[i]])
+        elif entity_type == 'variables':
+            simplified_model = model.copy()
+            simplified_model, variable_remove = remove_variables_flexibility(simplified_model, values, names, percentile, 'Percentage')
+            get_remove_name = variable_remove
+        elif entity_type == 'importance_variables':
+            simplified_model.remove(simplified_model.getVarByName(names[order[i]]))
     elif type_simplyfied == 'Epsilon':
         order = np.argsort(abs_values)
         # Delay the values that are less than epsilon
-        for i in range(len(order)):
-            if abs_values[order[i]] < percentile:
-                if entity_type == 'constraints':
+        if entity_type == 'constraints':
+            for i in range(len(order)):
+                if abs_values[order[i]] < percentile:
                     simplified_model.remove(simplified_model.getConstrByName(names[order[i]]))
                     get_remove_name.append(names[order[i]])
-                elif entity_type == 'variables':
-                    simplified_model.remove(simplified_model.getVarByName(names[order[i]]))
-                    get_remove_name.append(names[order[i]])
-                elif entity_type == 'importance_variables':
+        elif entity_type == 'variables':
+            variables_to_remove, constrs_remove = remove_variables_flexibility(simplified_model, values, names, percentile)
+            # for i in range(len(variables_to_remove)):
+            #     simplified_model.remove(simplified_model.getVarByName(variables_to_remove[i]))
+            #     get_remove_name.append(variables_to_remove[i])
+            # for i in range(len(constrs_remove)):
+            #     simplified_model.remove(simplified_model.getConstrByName(constrs_remove[i]))
+        elif entity_type == 'importance_variables':
+            for i in range(len(order)):
+                if abs_values[order[i]] < percentile:
                     simplified_model.remove(simplified_model.getVarByName(names[order[i]]))
 
     simplified_model.update()
 
     simplified_model.setParam('OutputFlag', 0)
     simplified_model.optimize()
-
     if simplified_model.status == GRB.OPTIMAL:
         objective_value = simplified_model.ObjVal
         print('Objective value after removal:', objective_value)
@@ -261,8 +351,10 @@ def marginal_values_handler(model, values, names, percentile, entity_type='const
 
     num_entities_after = len(simplified_model.getConstrs()) if entity_type == 'constraints' else len(simplified_model.getVars())
     print(f'Num {entity_type} after removal:', num_entities_after)
-
-    return num_entities_after, objective_value, simplified_model, get_remove_name
+    print(f'Num constraints after removal:', len(simplified_model.getConstrs()))
+    # delay simplyfied model
+    del simplified_model
+    return num_entities_after, objective_value, get_remove_name
 
 def main_marginal_values_handler(model, model_name, save_folder, min_threshold, max_threshold, step, metric = 'importance', save_result = True, entity_type='constraints', type_simplyfied='Percentile'):
     """
@@ -310,7 +402,7 @@ def main_marginal_values_handler(model, model_name, save_folder, min_threshold, 
     names_remove = []
     for threshold in thresholds:
         print(f'Processing threshold: {threshold}')
-        num, obj_value, _, name = marginal_values_handler(model, values, names, threshold, entity_type, type_simplyfied)
+        num, obj_value, name = marginal_values_handler(model, values, names, threshold, entity_type, type_simplyfied)
         num_entities.append(num)
         objective_values.append(obj_value)
         names_remove.append(name)
@@ -390,12 +482,11 @@ if __name__ == '__main__':
     model_name = real_model_path.split('/')[-1].split('.')[0]
     print(model_name)
     model = standard_form_e2(model)
-    model = normalize_variables(model)
     model.setParam('OutputFlag', 0)
-    thres, num, obj = main_marginal_values_handler(model, model_name, save_folder_variables, 0.000015, 0.0003, 0.2, 'importance', True, 'variables', 'Epsilon')
+    thres, num, obj = main_marginal_values_handler(model, model_name, save_folder_variables, PERCENTILE_MIN_C, PERCENTILE_MAX_V, STEP_V, 'importance', True, 'variables', 'Percentage')
     #plot_results(thres, obj, num, 'openTEPES_EAPP_2030_sc01_st1', save_simplified_variables, 'variables')
-    print(os.path.exists(save_simplified_constraints))
-    thres, num, obj = main_marginal_values_handler(model, model_name, save_folder_constraints, 0.0015, 0.03, 0.2, 'importance',True, 'constraints', 'Epsilon')
+    #print(os.path.exists(save_simplified_constraints))
+    #thres, num, obj = main_marginal_values_handler(model, model_name, save_folder_constraints, PERCENTILE_MIN_C, PERCENTILE_MAX_C, STEP_V, 'importance',True, 'constraints', 'Percentage')
     #plot_results(thres, obj, num, 'openTEPES_EAPP_2030_sc01_st1', save_simplified_constraints, 'constraints')
     # obj, variables, m_variables, m_constraints = get_marginal_values(model)
     # importance = importance_variables(model, variables, m_constraints)

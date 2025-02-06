@@ -273,19 +273,16 @@ def constraints_importance(model):
     model.setParam('OutputFlag',0)
     model.optimize()
     marginal_constraints = list(model.getAttr('Pi', model.getConstrs()))
-    solution = [var.X for var in model.getVars()]
     # For all constraints obtain the value of the solution
     A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model)
     constrs_names = [constr.ConstrName for constr in model.getConstrs()]
-    solution = np.array(solution)
-    # Csr matrix A
+    importance = np.array(marginal_constraints)
+    # divide by the sum of the row of A
     A = csr_matrix(A)
-    constraints_value = A.dot(solution)
-    # Get the importance of the constraints
-    marginal_constraints = np.array(marginal_constraints)
-    # constraint value* marginal constraints
-    importance = np.abs(constraints_value * marginal_constraints)
-    return importance, constrs_names
+    A = abs(A)
+    row_sum = np.array(A.sum(axis=1)).flatten()
+    importance = importance / row_sum   
+    return importance, constraint_names
 
 def variables_importance(model):
     model.setParam('OutputFlag',0)
@@ -298,12 +295,10 @@ def variables_importance(model):
     vars_names = [var.VarName for var in model.getVars()]
     c = np.array(c)
     solution = np.array(solution)
-    importance = np.abs((c - A.T.dot(marginal_constraints).flatten())*(solution))
-    print(importance.shape)
-    print(len(vars_names))
+    importance = np.abs(c - A.T.dot(marginal_constraints).flatten())
     return importance, vars_names
 
-def importances_by_groups(importances, names, model, group):
+def importances_by_groups(importances, names, model, metric, group):
     if group == 'constraints': 
         names, asos, groups, inverted_group = groups_by_constraints(model)
     elif group == 'variables':
@@ -311,8 +306,11 @@ def importances_by_groups(importances, names, model, group):
     total_importance = dict.fromkeys(groups.keys(), 0)
     for index, name in enumerate(names):
         group_name = inverted_group[name]
-        total_importance[group_name] += importances[index]
-    # Order the importance by the total importance
+        total_importance[group_name] += np.abs(importances[index])
+    if metric == 'sum':
+        total_importance = {k: v for k, v in total_importance.items()}
+    elif metric == 'mean':
+        total_importance = {k: v / len(groups[k]) for k, v in total_importance.items()}
     total_importance = dict(sorted(total_importance.items(), key=lambda item: item[1], reverse=True))
     return total_importance
 
@@ -324,7 +322,7 @@ def plot_importances_values(model,importances, names, save_path, group):
     total_importance = dict.fromkeys(groups.keys(), 0)
     for index, name in enumerate(names):
         group_name = inverted_group[name]
-        total_importance[group_name] += importances[index]
+        total_importance[group_name] += np.abs(importances[index])
     # Order the importance by the total importance
     total_importance = dict(sorted(total_importance.items(), key=lambda item: item[1], reverse=True))
     # Normalize total importance so that the sum is 1
@@ -351,52 +349,66 @@ def zero_importance_values(model):
     constraints_values = A.dot(solution)
     vars_names = [var.VarName for var in model.getVars()]
     constrs_names = [constr.ConstrName for constr in model.getConstrs()]
-    importance_constraints =constraints_values * marginal_constraints
-    importance_vars = np.abs(c - A.T.dot(marginal_constraints).flatten()*(solution))
-    group_zero_constraints = {}
-    group_zero_variables = {}
+    importance_constraints =np.abs(marginal_constraints)
+
+    importance_vars = np.abs(c - A.T.dot(marginal_constraints).flatten())
     _, asos_constraints, group_contrs, inverted_group_constrs = groups_by_constraints(model)
     _, asos_vars, group_vars, inverted_group_vars = groups_by_variables(model)
+    group_zero_constraints = dict.fromkeys(group_contrs.keys(), 0)
+    group_zero_variables = dict.fromkeys(group_vars.keys(), 0)
     for index, name in enumerate(constrs_names):
         if importance_constraints[index] == 0:
             group_name = inverted_group_constrs[name]
             if group_name in group_zero_constraints:
                 group_zero_constraints[group_name] += 1
-            else:
-                group_zero_constraints[group_name] = 1
     for index, name in enumerate(vars_names):
         if importance_vars[index] == 0:
             group_name = inverted_group_vars[name]
             if group_name in group_zero_variables:
                 group_zero_variables[group_name] += 1
-            else:
-                group_zero_variables[group_name] = 1
-    # Count the number of elements in each group
-    return group_zero_constraints, group_zero_variables
+    total_vars_group = get_total_by_group(asos_vars)
+    total_constr_group = get_total_by_group(asos_constraints)
+    return group_zero_constraints, group_zero_variables, total_vars_group, total_constr_group
 
-def plot_zero_importance(group_zero_constraints, group_zero_variables, save_path):
+def plot_zero_importance(group_zero_constraints, group_zero_variables, total_vars, total_constrs, save_path):
     plt.figure(figsize=(10, 5))
     group_zero_constraints = dict(sorted(group_zero_constraints.items(), key=lambda item: item[1], reverse=True))
-    plt.bar(range(len(group_zero_constraints)), group_zero_constraints.values(), color='skyblue', edgecolor='black')
-    plt.xticks(range(len(group_zero_constraints)), group_zero_constraints.keys(), rotation=90)
+    total_constrs = dict(sorted(total_constrs.items(), key=lambda item: item[1], reverse=True))
+    groups = list(total_constrs.keys())
+    
+    bar_width = 0.4
+    indices = range(len(groups))
+    
+    plt.bar(indices, total_constrs.values(), width=bar_width, color='lightcoral', edgecolor='black', alpha=0.7, label='Total constraints')
+    plt.bar([i + bar_width for i in indices], [group_zero_constraints.get(g, 0) for g in groups], width=bar_width, color='skyblue', edgecolor='black', alpha=0.7, label='Zero importance constraints')
+    
+    plt.xticks([i + bar_width / 2 for i in indices], groups, rotation=90)
     plt.xlabel('Constraints groups')
-    plt.ylabel('Number of constraints 0')
-    plt.title('Number of constraints with 0 importance')
+    plt.ylabel('Number of constraints')
+    plt.title('Comparison of Total and Zero Importance Constraints per Group')
+    plt.legend()
     plt.tight_layout()
-    name_constrs = 'group_zero_constraints.png'
+    name_constrs = 'group_zero_constraints_comparison.png'
     plt.savefig(os.path.join(save_path, name_constrs))
     plt.show()
 
     plt.figure(figsize=(10, 5))
-    # order the groups by the number of elements from the highest to the lowest
     group_zero_variables = dict(sorted(group_zero_variables.items(), key=lambda item: item[1], reverse=True))
-    plt.bar(range(len(group_zero_variables)), group_zero_variables.values(), color='skyblue', edgecolor='black')
-    plt.xticks(range(len(group_zero_variables)), group_zero_variables.keys(), rotation=90)
+    total_vars = dict(sorted(total_vars.items(), key=lambda item: item[1], reverse=True))
+    groups_vars = list(total_vars.keys())
+    
+    indices_vars = range(len(groups_vars))
+    
+    plt.bar(indices_vars, total_vars.values(), width=bar_width, color='lightcoral', edgecolor='black', alpha=0.7, label='Total variables')
+    plt.bar([i + bar_width for i in indices_vars], [group_zero_variables.get(g, 0) for g in groups_vars], width=bar_width, color='skyblue', edgecolor='black', alpha=0.7, label='Zero importance variables')
+    
+    plt.xticks([i + bar_width / 2 for i in indices_vars], groups_vars, rotation=90)
     plt.xlabel('Variables groups')
-    plt.ylabel('Number of variables 0')
-    plt.title('Number of variables with 0 importance')
+    plt.ylabel('Number of variables')
+    plt.title('Comparison of Total and Zero Importance Variables per Group')
+    plt.legend()
     plt.tight_layout()
-    name_vars = 'group_zero_variables.png'
+    name_vars = 'group_zero_variables_comparison.png'
     plt.savefig(os.path.join(save_path, name_vars)) 
     plt.show()
 
@@ -673,10 +685,26 @@ def multiple_solutions(model):
     model.optimize()
     print(model.objVal)
 
+def dual_values(model):
+    dual = construct_dual_model_sparse(model)
+    dual.setParam('OutputFlag', 0)
+    dual.optimize()
+    print(dual.objVal)
+    dual_solution = [var.X for var in dual.getVars()]
+    dual_name = [var.VarName for var in dual.getVars()]
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model)
+    A = csr_matrix(A)
+    A = abs(A)
+    row_sum = np.array(A.sum(axis=1)).flatten()
+    dual_solution = dual_solution / row_sum
+    return dual_solution, dual_name
+
 def check_dual_solution(model):
     dual_model = construct_dual_model_sparse(model)
     dual_model.setParam('OutputFlag', 0)
     dual_model.optimize()
+    # print the dual obj value
+    print(dual_model.objVal)
     dual_solution = [var.X for var in dual_model.getVars()]
     dual_name = [var.VarName for var in dual_model.getVars()]
     
@@ -694,10 +722,39 @@ def check_dual_solution(model):
 if __name__ == '__main__':
 
     model_open_tepes = read_model(open_tepes_9n)
-    model_open_tepes = normalize_variables(model_open_tepes)
-    #importance_constrs, constrs_names = constraints_importance(model_open_tepes)
-    #plot_importances_values(model_open_tepes, importance_constrs, constrs_names, save_path_constraints, 'constraints')
-    importance_vars, vars_names = variables_importance(model_open_tepes)
-    plot_importances_values(model_open_tepes, importance_vars, vars_names, save_path_constraints, 'variables')
-    zero_importance_constrs, zero_importance_vars = zero_importance_values(model_open_tepes)
-    plot_zero_importance(zero_importance_constrs, zero_importance_vars, save_path_zero)
+    model_open_tepes = set_bounds(model_open_tepes)
+    model_open_tepes.setParam('OutputFlag', 0)  
+    model_open_tepes.optimize()
+    solution = [var.X for var in model_open_tepes.getVars()]
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model_open_tepes)
+    solution = np.array(solution)
+    lb = np.array(lb)
+    ub = np.array(ub)
+    solution_n = (solution-lb) / (ub - lb)
+    model_open_tepes_norm = normalize_variables(model_open_tepes)
+    model_open_tepes_norm.setParam('OutputFlag', 0)
+    model_open_tepes_norm.optimize()
+    solution_norm = [var.X for var in model_open_tepes_norm.getVars()]
+    solution_norm = np.array(solution_norm)
+    # Compared the solution with the normalized solution
+    print(np.allclose(solution_norm, solution_n, atol=1e-6))
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_name, constraint_names = get_model_matrices(model_open_tepes_norm)
+    ub = np.array(ub)
+    lb = np.array(lb)
+    print('Model normalized')
+    # upper bound 
+    print(len(np.where(ub == 1)[0]))
+    print(len(np.where(lb == 0)[0]))
+    # check_dual_solution(model_open_tepes)
+    # importance_constrs, constrs_names = constraints_importance(model_open_tepes)
+    # imp_group_constrs = importances_by_groups(importance_constrs, constrs_names, model_open_tepes, 'mean','constraints')
+    # m_constraints, m_names = dual_values(model_open_tepes)
+    # imp_constrs = importances_by_groups(m_constraints, m_names, model_open_tepes, 'mean','constraints')  
+    # save_path = os.path.join(os.getcwd(),'description_data')
+    # save_path_constraints = os.path.join(save_path, 'constraints')
+    # plot_importances_values(model_open_tepes, m_constraints, m_names, save_path_constraints, 'constraints')
+    # importance_vars, vars_names = variables_importance(model_open_tepes)
+    # imp_group_vars = importances_by_groups(importance_vars, vars_names, model_open_tepes, 'mean','variables')
+    # plot_importances_values(model_open_tepes, importance_vars, vars_names, save_path_constraints, 'variables')
+    # zero_importance_constrs, zero_importance_vars, total_vars, total_constrs = zero_importance_values(model_open_tepes)
+    # plot_zero_importance(zero_importance_constrs, zero_importance_vars, total_vars, total_constrs, save_path_zero)

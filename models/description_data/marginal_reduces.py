@@ -31,7 +31,7 @@ results_simplified_constraints = os.path.join(results_folder, 'simplified_constr
 results_simplified_variables = os.path.join(results_folder, 'simplified_variables_percentage/openTEPES_EAPP_2030_sc01_st1_variables.json')
 
 # Save paths 
-interactive_figures = os.path.join(parent_path, 'figures_new/interactive_figures/marginal_values')
+interactive_figures = os.path.join(parent_path, 'figures_new/interactive_figures/marginal_value/simplified_constraints_percentage')
 real_problems = os.path.join(interactive_figures, 'real_problems')
 
 
@@ -68,28 +68,46 @@ def remove_group(model, group, entity_type):
         names, asosiations, groups, inverted_groups = groups_by_variables(model)
     for name in groups[group]:
         model.remove(model.getConstrByName(name))
+    model.update()
     return model
 
-def remove_all_groups(model, names_remove, min_threshold, max_threshold, step, entity_type = 'constraints',  save_path = None):
+def remove_all_groups(model, min_threshold, max_threshold, step, entity_type = 'constraints',  save_path = None):
+    model_imp = normalize_variables(model)
     if entity_type == 'constraints':
-        importance_constrs, constrs_names = constraints_importance(model)
-        group_imp = importances_by_groups(importance_constrs, constrs_names, model, 'constraints')
+        importance_constrs, constrs_names = constraints_importance(model_imp)
+        group_imp = importances_by_groups(importance_constrs, constrs_names, model_imp, 'constraints')
     elif entity_type == 'variables':
-        importance_vars, vars_names = variables_importance(model)
-        group_imp = importances_by_groups(importance_vars, vars_names, model, 'variables')
+        importance_vars, vars_names = variables_importance(model_imp)
+        group_imp = importances_by_groups(importance_vars, vars_names, model_imp, 'variables')
     thresholds = []
-    threshold = min_threshold
-    while threshold <= max_threshold:
-        thresholds.append(threshold)
-        threshold += step+threshold
-    thresholds = np.array(thresholds)
-    simplified_model = model.copy()
+    print(sorted(group_imp.items(), key=lambda x: x[1]))
+    # threshold = min_threshold
+    # while threshold <= max_threshold:
+    #     thresholds.append(threshold)
+    #     threshold += step
+    thresholds = np.linspace(min_threshold, max_threshold, 20)
+    print(thresholds)
+    groups_remove = []
     for threshold in thresholds:
-        associated_constraints, group_remove = remove_by_group(simplified_model, threshold, names_remove, entity_type)
-        for group in group_remove.keys():
-            if group_remove[group] > group_imp[group]:
-                remove_group(simplified_model, group, entity_type)
-    return asosiations, group_remove
+        print(f'Threshold: {threshold}')
+        simplified_model = model.copy()
+        for group in group_imp.keys():
+            if int(group_imp[group]) <= threshold:
+                groups_remove.append(group)
+                simplified_model = remove_group(simplified_model, group, entity_type)
+        simplified_model.setParam('OutputFlag', 0)  
+        simplified_model.optimize()
+        # Print the groups that remain  
+        groups = list(group_imp.keys())
+        groups_remain = [group for group in groups if group not in groups_remove]
+        print(f'Groups that remain: {groups_remain}')
+        print(f'Objective value: {simplified_model.objVal}')
+    return simplified_model
+
+def main_remove_all_groups(model, min_threshold, max_threshold, step, entity_type = 'constraints', save_path = None):
+    model = standard_form_e2(model)
+    group_remove = remove_all_groups(model, min_threshold, max_threshold, step, entity_type, save_path)
+    print(group_remove)
 
 def plot_changes_histogram_with_slider(model):
     """
@@ -382,12 +400,13 @@ def plot_changes_histogram_html(model, json_file, e_type, importance_by_group, s
     print(f"Interactive slider plot saved as '{html_file}'")
 
 if __name__ == '__main__': 
-    p, obj_values, names_remove = read_json(results_simplified_constraints)
+    #main_remove_all_groups(gp.read(open_tepes_9n), 0, 1e-10, 0.1, 'constraints', real_problems)
+    # p, obj_values, names_remove = read_json(results_simplified_constraints)
     model = gp.read(open_tepes_9n)
     model = standard_form_e2(model)
     model = normalize_variables(model)
-    #remove_by_group(model, 0, obj_values, names_remove, entity_type = 'constraints')
-    # plot_changes_histogram_with_slider(model)
+    # #remove_by_group(model, 0, obj_values, names_remove, entity_type = 'constraints')
+    # # plot_changes_histogram_with_slider(model)
     importance_constrs, constrs_names = constraints_importance(model)
     group_imp_constr = importances_by_groups(importance_constrs, constrs_names, model, 'constraints')
     plot_changes_histogram_html(model, results_simplified_constraints, 'constraints', group_imp_constr,  real_problems)
