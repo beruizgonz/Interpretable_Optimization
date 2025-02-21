@@ -181,7 +181,7 @@ def normalize_variables(model, alpha_min=0.1, alpha_max=10):
             normalized_model.addConstr(new_lhs == rhs, name=constr.ConstrName)
 
     normalized_model.update()
-    return normalized_model
+    return normalized_model, scaling_factors
 
 def set_bounds(model, alpha_min=0.1, alpha_max=10):
     A, b, c, co, lb, ub, of_sense, cons_senses, variable_names = calculate_bounds_candidates_sparse(model, None, None)
@@ -722,29 +722,42 @@ def check_dual_solution(model):
 if __name__ == '__main__':
 
     model_open_tepes = read_model(open_tepes_9n)
-    model_open_tepes = set_bounds(model_open_tepes)
-    model_open_tepes.setParam('OutputFlag', 0)  
-    model_open_tepes.optimize()
-    solution = [var.X for var in model_open_tepes.getVars()]
-    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model_open_tepes)
+    A, b, c, co, lb, ub, of_sense, cons_senses, var_names, constraint_names = get_model_matrices(model_open_tepes) 
+ 
+    model_open_tepes_1 = set_bounds(model_open_tepes)
+    model_open_tepes_1.setParam('OutputFlag', 0)  
+    model_open_tepes_1.optimize()
+    solution = [var.X for var in model_open_tepes_1.getVars()]
     solution = np.array(solution)
-    lb = np.array(lb)
-    ub = np.array(ub)
-    solution_n = (solution-lb) / (ub - lb)
-    model_open_tepes_norm = normalize_variables(model_open_tepes)
+    print(solution[0:10])
+    # A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model_open_tepes)
+    # solution = np.array(solution)
+    # solution_n = solution
+    # lb = np.array(lb)
+    # ub = np.array(ub)
+    model_open_tepes_norm, scaling = normalize_variables(model_open_tepes)
     model_open_tepes_norm.setParam('OutputFlag', 0)
     model_open_tepes_norm.optimize()
     solution_norm = [var.X for var in model_open_tepes_norm.getVars()]
     solution_norm = np.array(solution_norm)
-    # Compared the solution with the normalized solution
-    print(np.allclose(solution_norm, solution_n, atol=1e-6))
-    A, b, c, co, lb, ub, of_sense, cons_senses, variable_name, constraint_names = get_model_matrices(model_open_tepes_norm)
-    ub = np.array(ub)
-    lb = np.array(lb)
-    print('Model normalized')
-    # upper bound 
-    print(len(np.where(ub == 1)[0]))
-    print(len(np.where(lb == 0)[0]))
+    print(min(solution_norm))   
+    print(max(solution_norm))
+    print(solution_norm[0])
+    scaling_values = list(scaling.values())
+
+    # # if len(scaling_values) == 2:
+    # #     scale_factor = scaling_values[1]  # Pick the correct value
+    # #     offset = scaling_values[0]  # Offset value
+    # #     solution_norm = solution_norm * scale_factor + offset
+    # # Compared the solution with the normalized solution
+    # print(np.allclose(solution_norm, solution_n, atol=1e-6))
+    # A, b, c, co, lb, ub, of_sense, cons_senses, variable_name, constraint_names = get_model_matrices(model_open_tepes_norm)
+    # ub = np.array(ub)
+    # lb = np.array(lb)
+    # print('Model normalized')
+    # # upper bound 
+    # print(len(np.where(ub == 1)[0]))
+    #print(len(np.where(lb == 0)[0]))
     # check_dual_solution(model_open_tepes)
     # importance_constrs, constrs_names = constraints_importance(model_open_tepes)
     # imp_group_constrs = importances_by_groups(importance_constrs, constrs_names, model_open_tepes, 'mean','constraints')

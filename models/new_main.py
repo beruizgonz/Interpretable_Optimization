@@ -29,7 +29,7 @@ real_data_path = os.path.join(project_root, 'data/real_data')
 bounds_path = os.path.join(project_root, 'data/bounds_trace')
 
 GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
-model_path_modified = os.path.join(GAMS_path_modified, 'TABORA.mps')
+model_path_modified = os.path.join(GAMS_path_modified, 'TFORDY.mps')
 real_model_path = os.path.join(real_data_path,  'openTEPES_EAPP_2030_sc01_st1.mps')
 
 # PATH TO SAVE THE RESULTS
@@ -200,7 +200,7 @@ def sensitivity_analysis_file(file, save_path, opts):
             lb, ub = data['lb'][last_iteration_index], data['ub'][last_iteration_index]
         else:
             print('Calculating bounds...')
-            A_sparse, b_sparse, c, co, lb, ub, of_sense, cons_senses, variable_names = calculate_bounds_candidates_sparse_improve(original_primal, None, model_name)
+            A_sparse, b_sparse, c, co, lb, ub, of_sense, cons_senses, variable_names = calculate_bounds_candidates_sparse(original_primal, None, model_name)
 
     # Build model with bounds
     model_bounds = build_model(A_sparse, b_sparse, c, co, lb, ub, of_sense, cons_senses, variable_names)
@@ -242,7 +242,7 @@ def sensitivity_analysis_file(file, save_path, opts):
     elif opts.dependency_cols:
         operation = 'dependency_cols'
 
-    model_save_path = os.path.join(save_path, f'epsilon_{operation}_{model_name}_flexibility.json')
+    model_save_path = os.path.join(save_path, f'epsilon_{operation}_{model_name}_flexibility1.json')
     dict2json(results, model_save_path)
 
     return results

@@ -2044,8 +2044,6 @@ def compute_min_per_column(n_columns, indptr, data, ub_new):
                 ub_new[col] = min_val
     return ub_new
 
-import numpy as np
-import scipy.sparse
 
 def calculate_bounds_with_sparse(model):
     # Extract model matrices
@@ -2654,7 +2652,7 @@ def calculate_bounds_candidates_sparse(model, save_path, name, max_iterations=10
     return A_sparse, b, c, co, lb_new, ub_new, of_sense, cons_sense, variable_names
 
 
-def calculate_bounds_candidates_sparse_improve(model, save_path, name, max_iterations=100, tol=1e-6):
+def calculate_bounds_candidates_sparse_improve(model, save_path, name, max_iterations=50, tol=1e-6):
     """
     Iteratively calculate and update upper and lower bounds for variables in a linear programming model
     until convergence is achieved or the maximum number of iterations is reached, using more
@@ -2720,38 +2718,43 @@ def calculate_bounds_candidates_sparse_improve(model, save_path, name, max_itera
         min_activity_sums = np.add.reduceat(min_activity_matrix, A_indptr[:-1])
         # ub_numerators = b[row] - (min_activity_sum[row] - contribution_of_current_element)
         ub_numerators = b[row_indices] - (min_activity_sums[row_indices] - min_activity_matrix)
+        # change the ub numberator of nan to inf
+        ub_numerators[np.isnan(ub_numerators)] = np.inf
 
-        # Avoid division by zero: filter out A_data == 0
         nonzero_mask = (A_data != 0)
         temp_ubs = np.zeros_like(A_data, dtype=float)
+        #print(ub_numerators)
+        #print(A_data)
         temp_ubs = ub_numerators / A_data
+        #print(temp_ubs)
         # Valid candidate UB conditions: coeff > 0 and ub_numerator > 0
-        valid_ub_mask = ((A_data > 0) & (ub_numerators >= 0))  #| ((A_data < 0) & (ub_numerators < 0))
-        valid_lb_mask = ((A_data < 0) & (ub_numerators <= 0))
+        valid_ub_mask = (A_data > 0) #& (ub_numerators >= 0)  #| ((A_data < 0) & (ub_numerators < 0))
+        valid_lb_mask = (A_data < 0) #& (ub_numerators <= 0)
 
         print('Valid ub:', np.sum(valid_ub_mask))
         # Aggregate candidate upper bounds by taking the minimum for each variable
         candidate_ub = ub_new.copy()
         candidate_lb = lb_new.copy()
         # np.minimum.at applies element-wise min at specified indices
-        np.minimum.at(candidate_ub, A_indices[valid_ub_mask], temp_ubs[valid_ub_mask])
-        np.maximum.at(candidate_lb, A_indices[valid_lb_mask], temp_ubs[valid_lb_mask])
-        # Update ub_new
+        # np.minimum.at(candidate_ub, A_indices[valid_ub_mask], temp_ubs[valid_ub_mask])
+        # #
+        # np.maximum.at(candidate_lb, A_indices[valid_lb_mask], temp_ubs[valid_lb_mask])
+        # # Update ub_new
         ub_new = np.minimum(ub_new, candidate_ub)
         lb_new = np.maximum(lb_new, candidate_lb)
-        # num_columns = np.max(A_indices) + 1  # Assuming 0-based column indices
-        # column_min_ub = np.full(num_columns, np.inf)  # Initialize with a very high value
-        # column_max_lb = np.full(num_columns, -np.inf)  # Initialize with a very low value
-        # print('Column min ub:', column_min_ub.shape)
-        # # Compute the minimum value per column
-        # np.minimum.at(column_min_ub, A_indices[valid_ub_mask], temp_ubs[valid_ub_mask])
-        # np.maximum.at(column_max_lb, A_indices[valid_lb_mask], temp_ubs[valid_lb_mask])
-        # # Apply per-column min updates to `candidate_ub`
-        # # Get the minimum value for each column without using ub_new
-        # candidates_ub = np.minimum(ub_new, column_min_ub)
-        # candidate_lb = np.maximum(lb_new, column_max_lb)
-        # ub_new = candidates_ub
-        # lb_new = candidate_lb
+        num_columns = np.max(A_indices) + 1  # Assuming 0-based column indices
+        column_min_ub = np.full(num_columns, np.inf)  # Initialize with a very high value
+        column_max_lb = np.full(num_columns, 0)  # Initialize with a very low value
+        print('Column min ub:', column_min_ub.shape)
+        # Compute the minimum value per column
+        np.minimum.at(column_min_ub, A_indices[valid_ub_mask], temp_ubs[valid_ub_mask])
+        np.maximum.at(column_max_lb, A_indices[valid_lb_mask], temp_ubs[valid_lb_mask])
+        # Apply per-column min updates to `candidate_ub`
+        # Get the minimum value for each column without using ub_new
+        candidates_ub = np.minimum(ub_new, column_min_ub)
+        candidate_lb = np.maximum(lb_new, column_max_lb)
+        ub_new = candidates_ub
+        lb_new = candidate_lb
 
         # ======== Step 2: Calculate Lower Bounds ========
         # max_activity_matrix: For positive coefficients: max activity = coeff * ub_new[var]
@@ -2765,39 +2768,40 @@ def calculate_bounds_candidates_sparse_improve(model, save_path, name, max_itera
 
         # lb_numerators = b[row] - (max_activity_sum[row] - contribution_of_current_element)
         lb_numerators = b[row_indices] - (max_activity_sums[row_indices] - max_activity_matrix)
-
+        lb_numerators[np.isnan(lb_numerators)] = np.inf
         temp_lbs = np.zeros_like(A_data, dtype=float)
 
         temp_lbs = lb_numerators / A_data
         # Valid candidate LB conditions: coeff > 0 and lb_numerator > 0
-        valid_lb_mask = (A_data > 0) & (lb_numerators > 0)
-        not_valid_lb = (A_data > 0) & (lb_numerators < 0)
-        valid_ub_mask = (A_data < 0) & (lb_numerators < 0)
-        not_valid_ub = (A_data < 0) & (lb_numerators >= 0)
+        valid_lb_mask = (A_data > 0) #& (lb_numerators >= 0)
+        valid_ub_mask = (A_data < 0) #& (lb_numerators <= 0)
         # print the number of elements that are valid lb
         print('Valid lb:', np.sum(valid_lb_mask))
         candidate_lb = lb_new.copy()
         candidate_ub = ub_new.copy()   
         # Apply element-wise max at indices corresponding to valid_lb_mask
-        np.maximum.at(candidate_lb, A_indices[valid_lb_mask], temp_lbs[valid_lb_mask])
-        np.minimum.at(candidate_ub, A_indices[valid_ub_mask], temp_lbs[valid_ub_mask])
-        # Update lb_new
-        lb_new = np.maximum(lb_new, candidate_lb)
-        ub_new = np.minimum(ub_new, candidate_ub)
-        # num_columns = np.max(A_indices) + 1  # Assuming 0-based column indices
-        # column_max_lb = np.full(num_columns, -np.inf)  # Initialize with a very low value
-        # print('Column max lb:', column_max_lb.shape)
-        # # Compute the maximum value per column
-        # np.maximum.at(column_max_lb, A_indices[valid_lb_mask], temp_lbs[valid_lb_mask])
-        # # Apply per-column max updates to `candidate_lb`
-        # # Get the maximum value for each column without using lb_new
-        # print(lb_new.shape)
-        # candidate_lb = np.maximum(lb_new, column_max_lb)
-        lb_new = candidate_lb   
-        # Store iteration bounds trace
-        bound_trace['iteration'].append(iteration)
-        bound_trace['lb'].append(lb_new)
-        bound_trace['ub'].append(ub_new)
+        # np.maximum.at(candidate_lb, A_indices[valid_lb_mask], temp_lbs[valid_lb_mask])
+        # np.minimum.at(candidate_ub, A_indices[valid_ub_mask], temp_lbs[valid_ub_mask])
+        # # Update lb_new
+        # lb_new = np.maximum(lb_new, candidate_lb)
+        # ub_new = np.minimum(ub_new, candidate_ub)
+        num_columns = np.max(A_indices) + 1  # Assuming 0-based column indices
+        column_min_ub = np.full(num_columns, np.inf)  # Initialize with a very high value
+        column_max_lb = np.full(num_columns, 0)  # Initialize with a very low value
+        print('Column min ub:', column_min_ub.shape)
+        # Compute the minimum value per column
+        np.minimum.at(column_min_ub, A_indices[valid_lb_mask], temp_ubs[valid_lb_mask])
+        np.maximum.at(column_max_lb, A_indices[valid_ub_mask], temp_ubs[valid_ub_mask])
+        # Apply per-column min updates to `candidate_ub`
+        # Get the minimum value for each column without using ub_new
+        candidates_ub = np.minimum(ub_new, column_min_ub)
+        candidate_lb = np.maximum(lb_new, column_max_lb)
+        ub_new = candidates_ub
+        lb_new = candidate_lb
+        # # Store iteration bounds trace
+        # bound_trace['iteration'].append(iteration)
+        # bound_trace['lb'].append(lb_new)
+        # bound_trace['ub'].append(ub_new)
 
         # ======== Step 3: Check for Convergence ========
         # Check if changes are within tolerance

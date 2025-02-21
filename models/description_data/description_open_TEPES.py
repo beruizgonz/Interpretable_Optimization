@@ -23,9 +23,14 @@ open_tepes_9n = os.path.join(real_data_path, 'openTEPES_EAPP_2030_sc01_st1.mps')
 
 # Go to the modification presolve files
 results_folder = os.path.join(parent_path, 'results_new/global/sparse/real_problems') 
-results_sparsification_open_tepes_9n = os.path.join(results_folder, 'sparsification/epsilon_sparsification_openTEPES_EAPP_2030_sc01_st1.json')
+results_sparsification_open_tepes_9n = os.path.join(results_folder, 'sparsification_improve/epsilon_sparsification_openTEPES_EAPP_2030_sc01_st1_flexibility1.json')
 results_cols_open_tepes_9n = os.path.join(results_folder, 'epsilon_cols_abs/epsilon_cols_openTEPES_EAPP_2030_sc01_st1.json')
 results_rows_open_tepes_9n = os.path.join(results_folder, 'epsilon_rows_abs/epsilon_rows_openTEPES_EAPP_2030_sc01_st1.json')
+
+figures_folder = os.path.join(parent_path, 'figures_new/global/sparse/real_problems') 
+figures_sparsifaction_open_tepes_9n = os.path.join(figures_folder, 'sparsification_improve')
+
+
 
 def read_json(file):
     """
@@ -483,7 +488,7 @@ def plot_changes_matrix(model):
     association_dict = create_association_dict(group_variables, group_constraints, inverted_group_v, inverted_group_c, map_position)
     changes_pos_to_name, epsilon, obj_value = main(model, 1, 'Sparsification', 'Matrix')
     changes = create_association_dict(group_variables, groups_constraints, inverted_group_v, inverted_group_c, changes_pos_to_name)
-    plot_group_matrix(group_variables, group_constraints, changes)
+    plot_group_matrix(group_variables, group_constraints, changes, 'Changes in sparsification', 3, figures_sparsifaction_open_tepes_9n)
 
 def plot_slider_group_matrix(model):
     """
@@ -629,18 +634,19 @@ if __name__ == '__main__':
     A = model_standar_open_tepes.getA()
     #plot_slider_group_matrix(model_standar_open_tepes)
     # plot_changes_matrix(model_standar_open_tepes)   
-    # #rows_changed, columns_changed, indices_changed, epsilon = read_json(results_sparsification_open_tepes_9n)
-    # # # Get the different types of variables in the model
-    # # types = types_variables(model_standar_open_tepes)
-    names_constraints_original, associated_constraints, group_constraints_original, inverted_group_c = groups_by_constraints(model_standar_open_tepes)
-    # # print('hecho')
-    names_variables, associated_variables, group_variables, inverted_group_v = groups_by_variables(model_standar_open_tepes)
-    # # print('hecho')
-    # print('Variables:', associated_variables)
-    # print('Constraints:', associated_constraints)
-    postoname = map_position_to_names(model_standar_open_tepes)
-    asos = create_association_dict(group_variables, group_constraints_original, inverted_group_v, inverted_group_c, postoname)
-    plot_group_matrix(group_variables, group_constraints_original,asos)
+    plot_slider_group_matrix(model_standar_open_tepes)
+    # rows_changed, columns_changed, indices_changed, epsilon = read_json(results_sparsification_open_tepes_9n)
+    # # # # Get the different types of variables in the model
+    # # # types = types_variables(model_standar_open_tepes)
+    # names_constraints_original, associated_constraints, group_constraints_original, inverted_group_c = groups_by_constraints(model_standar_open_tepes)
+    # # # print('hecho')
+    # names_variables, associated_variables, group_variables, inverted_group_v = groups_by_variables(model_standar_open_tepes)
+    # # # print('hecho')
+    # # print('Variables:', associated_variables)
+    # # print('Constraints:', associated_constraints)
+    # postoname = map_position_to_names(model_standar_open_tepes)
+    # asos = create_association_dict(group_variables, group_constraints_original, inverted_group_v, inverted_group_c, postoname)
+    #plot_group_matrix(group_variables, group_constraints_original,asos)
     # model = model_standar_open_tepes
     # group_variables = group_variables
     # #group_constraints = group_constraints_original

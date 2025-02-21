@@ -624,7 +624,7 @@ def construct_dual_model_sparse(standard_model):
 
     A_transpose = A.transpose()
     dual_model.addMConstr(A_transpose, dual_vars, inequality_sense, c, name=variable_names)
-
+    dual_model.update()
     return dual_model
 
 

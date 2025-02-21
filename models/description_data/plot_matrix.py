@@ -214,7 +214,7 @@ def plot_changes_histogram(dict_change_groups, dict_group, title, epsilon_number
     plt.show()
     print(f"Plot saved as {filename}")
 
-def plot_group_matrix(variable_groups, constraint_groups, associations):
+def plot_group_matrix(variable_groups, constraint_groups, associations, title_graph, decimal, save_path):
     """
     Plots a heatmap to represent associations between variable groups and constraint groups.
 
@@ -262,10 +262,12 @@ def plot_group_matrix(variable_groups, constraint_groups, associations):
     # Label each cell with the corresponding association value
     for i in range(num_vars):
         for j in range(num_constraints):
-            ax.text(i, j, f"{matrix[j,i]:.0f}", va='center', ha='center', color='white', fontsize=7.5)   # Increased font size
+            ax.text(i, j, f"{matrix[j,i]:.{decimal}f}", va='center', ha='center', color='white', fontsize=7.5)   # Increased font size
 
-    plt.title('Number of elements per Constraint-Variable Group', fontsize=16)  # Increased font size
+    plt.title(f'{title_graph}', fontsize=16)  # Increased font size
     plt.xlabel('Variables Groups', fontsize=14)  # Increased font size
     plt.ylabel('Constraints Groups', fontsize=14)  # Increased font size
     plt.tight_layout()
+    total_path = f'{save_path}/{title_graph}.png'   
+    plt.savefig(total_path)
     plt.show()

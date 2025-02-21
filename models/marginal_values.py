@@ -12,12 +12,12 @@ from utils_models.standard_model import*
 
 # PATHS TO THE LOAD THE DATA
 project_root = os.path.dirname(os.getcwd())
-model_path = os.path.join(project_root, 'data/GAMS_library', 'AJAX.mps')
+model_path = os.path.join(project_root, 'data/GAMS_library', 'PDI.mps')
 GAMS_path = os.path.join(project_root, 'data/GAMS_library')
 real_data_path = os.path.join(project_root, 'data/real_data')
 
 GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
-model_path_modified = os.path.join(GAMS_path_modified, 'DINAM.mps')
+model_path_modified = os.path.join(GAMS_path_modified, 'PDI.mps')
 real_model_path = os.path.join(real_data_path,  'openTEPES_EAPP_2030_sc01_st1.mps')
 
 # PATH TO SAVE THE RESULTS
@@ -56,6 +56,7 @@ def get_marginal_values(model):
     - marginal_constraints: List of shadow prices (marginal values) corresponding to each constraint in the model.
     """
     model.setParam('OutputFlag', 0)
+    #model.setParam('Method', 0)
     model.optimize()
     marginal_variables = list(model.getAttr('RC', model.getVars()))
     marginal_constraints = list(model.getAttr('Pi', model.getConstrs()))
@@ -453,7 +454,23 @@ def compared_importance_marginal_variables(model):
     m_varialbes_basis = m_variables[basis_variables]
     print(m_varialbes_basis)
 
-
+def compared_marginal_values(model, entity_type = 'constraints'): 
+    """
+    Compare the marginal values of the model with the construction of my dual model
+    """
+    obj, _, m_variables, m_constraints = get_marginal_values(model)
+    dual_model = construct_dual_model_sparse(model) 
+    dual_A = dual_model.getA()
+    dual_model.optimize()
+    print(dual_model.ObjVal)
+    print(A.shape)  
+    dual_solution = np.array(m_constraints)
+    constraints =dual_model.getAttr('RHS', dual_model.getConstrs())
+    constr = dual_A.dot(dual_solution)
+    # Evaluate dual solution in the objective function
+    obj = dual_model.getAttr('Obj', dual_model.getVars())
+    obj_value = dual_solution.dot(obj)
+    print(obj_value)
 
 if __name__ == '__main__':
     # for model_name in os.listdir(GAMS_path_modified):
@@ -478,12 +495,15 @@ if __name__ == '__main__':
         # pareto_analysis(save_pareto_constraints, name, values_c, names_c, 'Constraints')
         # v_values, v_variables = get_values_variables(model)
         # pareto_analysis(save_pareto_variables, name, v_values, v_variables, 'Variables')
+    #for model_path in os.listdir(GAMS_path_modified): 
     model = gp.read(real_model_path)
     model_name = real_model_path.split('/')[-1].split('.')[0]
     print(model_name)
     model = standard_form_e2(model)
-    model.setParam('OutputFlag', 0)
-    thres, num, obj = main_marginal_values_handler(model, model_name, save_folder_variables, PERCENTILE_MIN_C, PERCENTILE_MAX_V, STEP_V, 'importance', True, 'variables', 'Percentage')
+    A = model.getA()
+    print(A.shape)
+    compared_marginal_values(model)
+   # thres, num, obj = main_marginal_values_handler(model, model_name, save_folder_variables, PERCENTILE_MIN_C, PERCENTILE_MAX_V, STEP_V, 'importance', True, 'variables', 'Percentage')
     #plot_results(thres, obj, num, 'openTEPES_EAPP_2030_sc01_st1', save_simplified_variables, 'variables')
     #print(os.path.exists(save_simplified_constraints))
     #thres, num, obj = main_marginal_values_handler(model, model_name, save_folder_constraints, PERCENTILE_MIN_C, PERCENTILE_MAX_C, STEP_V, 'importance',True, 'constraints', 'Percentage')
