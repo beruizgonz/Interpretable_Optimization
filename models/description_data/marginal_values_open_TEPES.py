@@ -728,6 +728,7 @@ if __name__ == '__main__':
     model_open_tepes_1.setParam('OutputFlag', 0)  
     model_open_tepes_1.optimize()
     solution = [var.X for var in model_open_tepes_1.getVars()]
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model_open_tepes_1)
     solution = np.array(solution)
     print(solution[0:10])
     # A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model_open_tepes)
@@ -758,6 +759,10 @@ if __name__ == '__main__':
     # # upper bound 
     # print(len(np.where(ub == 1)[0]))
     #print(len(np.where(lb == 0)[0]))
+    # Compared the solution with the normalized solution
+    print(np.allclose(solution_norm, solution_n, atol=1e-6))
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_name, constraint_names = get_model_matrices(model_open_tepes_norm)
+    print('Model normalized')
     # check_dual_solution(model_open_tepes)
     # importance_constrs, constrs_names = constraints_importance(model_open_tepes)
     # imp_group_constrs = importances_by_groups(importance_constrs, constrs_names, model_open_tepes, 'mean','constraints')

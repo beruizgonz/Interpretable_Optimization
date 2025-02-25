@@ -1042,6 +1042,8 @@ def measuring_constraint_infeasibility1(target_model, decisions):
 
     # Compute all constraint LHS values in one go
     # A should be a sparse matrix, so A.dot(decisions) is efficient.
+    num_vars = A.shape[1]
+    decisions = decisions[:num_vars]
     LHS = A.dot(decisions)
 
     # Retrieve the constraint senses once

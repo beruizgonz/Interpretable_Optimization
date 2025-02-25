@@ -123,76 +123,67 @@ def remove_variables_flexibility(model, values, names, percentile, metric = 'Per
     return model, variables_to_remove
 
 
-def flexibility_model(model, variables_to_remove, epsilon=0.015):
-    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constrs_names = get_model_matrices(model)
+def flexibility_model(model, vars_remove):
+    """
+    Efficiently determines the minimum and maximum coefficient values for each row 
+    related to the variables in `vars_remove`, and updates constraint senses accordingly.
 
-    min_max_indices = {}  # Dictionary to track min/max indices for each row
-    constraints_to_remove = {}
-    
-    # Get variable indices
-    var_indices_to_remove = {var: i for i, var in enumerate(variable_names)}
-    var_indices_to_remove = [var_indices_to_remove[var] for var in variables_to_remove if var in var_indices_to_remove]
+    Parameters:
+        A (scipy.sparse matrix): The constraint matrix.
+        b (numpy array): The right-hand side vector of the constraints.
+        cons_senses (dict): Dictionary mapping row indices to constraint senses.
+        vars_remove (dict): Dictionary mapping row indices to sets of column indices to remove.
 
-    if issparse(A):  
-        A = A.tocsc()  # Convert to CSC for fast column slicing
-        var_indices_to_remove = np.array(var_indices_to_remove, dtype=int)
-        row_indices, col_indices = A[:, var_indices_to_remove].nonzero()
+    Returns:
+        cons_senses (dict): Updated constraint senses.
+        new_vars (set): Set of variables affected by constraint modifications.
+    """    
+    new_vars = []
+    A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model)
+    # View the rows that are affected by the variables to remove
+    affected_rows = np.unique(np.where(A[:, vars_remove].toarray() != 0)[0])
+    print(affected_rows[0:10])
+    for row in vars_remove:
+        constraint_name = constraint_names[row]  # Get the constraint name
 
-        # Track min/max for each constraint
-        for row, col in zip(row_indices, col_indices):
-            constr_name = constrs_names[row]
-            actual_col = var_indices_to_remove[col]  # Map to original indices
-            value = A[row, actual_col]  # Extract actual coefficient value
+        # Add excess variable with constraint-specific naming
+        excess_var = model.addVar(
+            lb=0, ub=GRB.INFINITY, obj=0, vtype=GRB.CONTINUOUS, 
+            name=f"excess_{constraint_name}"
+        )
+        new_vars.append(excess_var)
+        # Add slack variable with constraint-specific naming
+        slack_var = model.addVar(
+            lb=0, ub=GRB.INFINITY, obj=0, vtype=GRB.CONTINUOUS, 
+            name=f"defect_{constraint_name}"
+        )
+        new_vars.append(slack_var)
 
-            if constr_name not in min_max_indices:
-                min_max_indices[constr_name] = [value, value]  # Store (min, max values)
-            else:
-                min_max_indices[constr_name][0] = min(min_max_indices[constr_name][0], value)  # Update min value
-                min_max_indices[constr_name][1] = max(min_max_indices[constr_name][1], value)  # Update max value
+    model.update()  # Ensure variables are added before modifying constraints
+    # Modify constraints to include excess and slack variables
+    for constr in model.getConstrs():
+        constr_name = constr.ConstrName  # Get the constraint name
+        rhs = constr.RHS  # Get the right-hand side value
+        excess_var = model.getVarByName(f"excess_{constr_name}")
+        slack_var = model.getVarByName(f"defect_{constr_name}")
+        # Add the new constraint
+        if excess_var and slack_var:
+            row_expr = model.getRow(constr)  # Get the existing constraint expression
+            
+            # Modify the constraint directly
+            row_expr += excess_var - slack_var  # Adjust the expression
 
-    else:  # Dense matrix case
-        constraints_to_remove = np.where(np.any(A[:, var_indices_to_remove] != 0, axis=1))[0]
+            model.chgCoeff(constr, excess_var, 1)  # Add excess variable coefficient
+            model.chgCoeff(constr, slack_var, -1) # Add the new constraint
 
-    # Remove variables safely
-    variables_to_remove_filtered = [
-        model.getVarByName(var_name) for var_name in variables_to_remove if model.getVarByName(var_name) is not None
-    ]
-    
-    print(f"Removing {len(variables_to_remove_filtered)} variables from the model.")
-    model.remove(variables_to_remove_filtered)
     model.update()
-
-    entro1 = 0
-    entro2 = 0
-    entro3 = 0
-    # Update constraint senses based on min/max index
-    for constr_name, (min_idx, max_idx) in min_max_indices.items():
-        constr = model.getConstrByName(constr_name)
-        abs_min, abs_max = abs(min_idx), abs(max_idx)
-        
-        if abs_min < epsilon:
-            entro3 += 1
-            constr.Sense = 'E'  # Equality constraint
-        elif min_idx < 0:
-            entro1 += 1
-            constr.Sense = 'G'  # Greater than or equal
-        elif max_idx > 0:
-            entro2 += 1
-            constr.Sense = 'L'  # Less than or equal
-        else:
-            constr.Sense = 'E'  # Default to equality
-
-    print(entro1, entro2, entro3)
-    model.update()
-    
-    return model, variables_to_remove
+    return model, vars_remove
 
 
 
 def remove_variables(model, interest_vars):
     names_var, asos_var, group_var, invert_var = groups_by_variables(model)
     A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model)
-    print(A.shape)
     for i in interest_vars:
         interest_var = i
         # Get the position that start with the interest_var

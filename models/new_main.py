@@ -29,7 +29,7 @@ real_data_path = os.path.join(project_root, 'data/real_data')
 bounds_path = os.path.join(project_root, 'data/bounds_trace')
 
 GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
-model_path_modified = os.path.join(GAMS_path_modified, 'TFORDY.mps')
+model_path_modified = os.path.join(GAMS_path_modified, 'TABORA.mps')
 real_model_path = os.path.join(real_data_path,  'openTEPES_EAPP_2030_sc01_st1.mps')
 
 # PATH TO SAVE THE RESULTS
@@ -110,20 +110,19 @@ def sensitivity_analysis(model, presolve, dual=False, min_threshold=0.0015, max_
         print(f"Threshold: {threshold}")
 
         # Apply presolve operations
-        A_new, b_new, _, _, _, _, cons_senses_new, _, _, _, _, _ = presolve.orchestrator_presolve_operations(
+        A_new, b_new, c_new, lb_new, ub_new, of_sense_new, cons_senses_new, co_new, variable_names_new, _, _, _ = presolve.orchestrator_presolve_operations(
             model=original_model, epsilon=threshold
         )
-        
+        print(A_new.shape)
+        print(A_initial.shape)
         A_changed = csr_matrix(A_new)
         non_zeros = A_initial.nonzero()
         indices = [(int(i), int(j)) for i, j in zip(*non_zeros) if A_changed[i, j] == 0]
         zero_columns = np.where(A_changed.getnnz(axis=0) == 0)[0]
         zero_rows = np.where(A_changed.getnnz(axis=1) == 0)[0]
-
         print(f'Changed: {len(indices)}, Zero columns: {len(zero_columns)}, Zero rows: {len(zero_rows)}')
-
         # Build and optimize new model
-        iterative_model = build_model(A_new, b_new, c, co, lb, ub, of_sense, cons_senses_new, variable_names)
+        iterative_model = build_model(A_new, b_new, c_new, co_new, lb_new, ub_new, of_sense_new, cons_senses_new, variable_names_new)
         start_time = datetime.now()
 
         iterative_model.setParam('OutputFlag', 0)
@@ -242,7 +241,7 @@ def sensitivity_analysis_file(file, save_path, opts):
     elif opts.dependency_cols:
         operation = 'dependency_cols'
 
-    model_save_path = os.path.join(save_path, f'epsilon_{operation}_{model_name}_flexibility1.json')
+    model_save_path = os.path.join(save_path, f'epsilon_{operation}_{model_name}_improve.json')
     dict2json(results, model_save_path)
 
     return results

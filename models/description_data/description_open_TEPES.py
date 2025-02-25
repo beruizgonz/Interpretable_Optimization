@@ -632,21 +632,21 @@ if __name__ == '__main__':
     model_open_tepes = gp.read(open_tepes_9n)
     model_standar_open_tepes = standard_form_e2(model_open_tepes)
     A = model_standar_open_tepes.getA()
-    #plot_slider_group_matrix(model_standar_open_tepes)
-    # plot_changes_matrix(model_standar_open_tepes)   
     plot_slider_group_matrix(model_standar_open_tepes)
+    # plot_changes_matrix(model_standar_open_tepes)   
+    #plot_slider_group_matrix(model_standar_open_tepes)
     # rows_changed, columns_changed, indices_changed, epsilon = read_json(results_sparsification_open_tepes_9n)
     # # # # Get the different types of variables in the model
     # # # types = types_variables(model_standar_open_tepes)
-    # names_constraints_original, associated_constraints, group_constraints_original, inverted_group_c = groups_by_constraints(model_standar_open_tepes)
+    names_constraints_original, associated_constraints, group_constraints_original, inverted_group_c = groups_by_constraints(model_standar_open_tepes)
     # # # print('hecho')
-    # names_variables, associated_variables, group_variables, inverted_group_v = groups_by_variables(model_standar_open_tepes)
+    names_variables, associated_variables, group_variables, inverted_group_v = groups_by_variables(model_standar_open_tepes)
     # # # print('hecho')
     # # print('Variables:', associated_variables)
     # # print('Constraints:', associated_constraints)
-    # postoname = map_position_to_names(model_standar_open_tepes)
-    # asos = create_association_dict(group_variables, group_constraints_original, inverted_group_v, inverted_group_c, postoname)
-    #plot_group_matrix(group_variables, group_constraints_original,asos)
+    postoname = map_position_to_names(model_standar_open_tepes)
+    asos = create_association_dict(group_variables, group_constraints_original, inverted_group_v, inverted_group_c, postoname)
+    plot_group_matrix(group_variables, group_constraints_original,asos, 'Number of variables per group and constraint', 0, figures_folder)
     # model = model_standar_open_tepes
     # group_variables = group_variables
     # #group_constraints = group_constraints_original

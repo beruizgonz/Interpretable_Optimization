@@ -9,13 +9,15 @@ warnings.filterwarnings("ignore", category=RuntimeWarning)
 from datetime import datetime
 import logging
 import os
+import gurobipy as gp   
+from gurobipy import GRB
 from scipy.sparse import coo_matrix, csr_matrix, lil_matrix
 from scipy.linalg import qr
 
 import numpy as np
 from scipy.sparse import issparse, csc_matrix
 
-def flexibility_constraints(A, b, cons_senses, vars_remove):
+def flexibility_constraints(model, constraint_names, vars_remove):
     """
     Efficiently determines the minimum and maximum coefficient values for each row 
     related to the variables in `vars_remove`, and updates constraint senses accordingly.
@@ -29,71 +31,46 @@ def flexibility_constraints(A, b, cons_senses, vars_remove):
     Returns:
         cons_senses (dict): Updated constraint senses.
         new_vars (set): Set of variables affected by constraint modifications.
-    """
-
-    if issparse(A):
-        A = A.tocsc()  # Convert to CSC format for efficient column access
-
-    # Get nonzero row and column indices
-    row_indices, col_indices = A.nonzero()
-    
-    # Initialize dictionaries for min/max values and affected variables
-    row_min_max = {}
-    variables = {}
-
-    # Efficiently determine min/max values for each row
+    """    
+    print(len(vars_remove))
+    new_vars = []
     for row in vars_remove:
-        cols_to_remove = list(vars_remove[row])
+        constraint_name = constraint_names[row]  # Get the constraint name
 
-        if len(cols_to_remove) == 0:
-            continue  # Skip empty rows
+        # Add excess variable with constraint-specific naming
+        excess_var = model.addVar(
+            lb=0, ub=GRB.INFINITY, obj=0, vtype=GRB.CONTINUOUS, 
+            name=f"excess_{constraint_name}"
+        )
+        new_vars.append(excess_var)
+        # Add slack variable with constraint-specific naming
+        slack_var = model.addVar(
+            lb=0, ub=GRB.INFINITY, obj=0, vtype=GRB.CONTINUOUS, 
+            name=f"defect_{constraint_name}"
+        )
+        new_vars.append(slack_var)
 
-        # Extract only relevant columns from the row
-        row_values = A[row, cols_to_remove].toarray().flatten()
+    model.update()  # Ensure variables are added before modifying constraints
+    print(len(new_vars))
+    # Modify constraints to include excess and slack variables
+    for constr in model.getConstrs():
+        constr_name = constr.ConstrName  # Get the constraint name
+        rhs = constr.RHS  # Get the right-hand side value
+        excess_var = model.getVarByName(f"excess_{constr_name}")
+        slack_var = model.getVarByName(f"defect_{constr_name}")
+        # Add the new constraint
+        if excess_var and slack_var:
+            row_expr = model.getRow(constr)  # Get the existing constraint expression
+            
+            # Modify the constraint directly
+            row_expr += excess_var - slack_var  # Adjust the expression
 
-        # Find min and max efficiently
-        min_idx = np.argmin(row_values)
-        max_idx = np.argmax(row_values)
+            model.chgCoeff(constr, excess_var, 1)  # Add excess variable coefficient
+            model.chgCoeff(constr, slack_var, -1) # Add the new constraint
 
-        min_value = row_values[min_idx]
-        max_value = row_values[max_idx]
+    model.update()
+    return model
 
-        row_min_max[row] = (min_value, max_value)
-        variables[row] = cols_to_remove  # Store variable indices for this row
-
-    # Update constraint senses
-    new_vars = set()
-    entro1, entro2, entro3 = 0, 0, 0
-
-    for row, (min_col, max_col) in row_min_max.items():
-        abs_min, abs_max = abs(min_col), abs(max_col)
-
-        # Check the sign consistency
-        if np.sign(min_col) == np.sign(max_col):
-            if min_col < 0:
-                entro1 += 1
-                cons_senses[row] = '>='
-            elif max_col > 0:
-                entro2 += 1
-                cons_senses[row] = '<='
-            new_vars.update(variables[row])
-        else:
-            if abs_min < abs_max:
-    
-                cons_senses[row] = '>='
-            elif abs_min > abs_max: 
-                entro3 += 1
-                cons_senses[row] = '<='
-            elif abs_min == abs_max:
-                entro3 += 1
-                cons_senses[row] = '='
-            #     cons_senses[row] = '='
-            new_vars.update(variables[row])
-
-    print('Number of variables to remove:', len(new_vars))
-    print(entro1, entro2, entro3)
-    
-    return cons_senses, new_vars
 
 def flexibility_constraints1(A, b, cons_senses, vars_remove):
     # obtain the min max of the variable for each row to reduce
@@ -164,6 +141,7 @@ class PresolvepsilonOperations:
         self.of_sense = None
         self.cons_senses = None
         self.variable_names = None
+        self.constr_names = None
         self.original_row_index = None
         self.original_column_index = None
 
@@ -194,7 +172,7 @@ class PresolvepsilonOperations:
         else:
             print("Using the model matrices")
             model_bounds = model
-        self.A, self.b, self.c, self.co, self.lb, self.ub, self.of_sense, self.cons_senses, self.variable_names = (
+        self.A, self.b, self.c, self.co, self.lb, self.ub, self.of_sense, self.cons_senses, self.variable_names, self.constr_names = (
             get_model_matrices(model_bounds))
         ub = np.array(self.ub)
         print('Finite upper: ', np.sum(np.isfinite(ub)), 'Total upper: ', len(ub))
@@ -480,6 +458,7 @@ class PresolvepsilonOperationsSparse:
         self.ub = None
         self.of_sense = None
         self.cons_senses = None
+        self.constraint_names = None
         self.variable_names = None
         self.original_row_index = None
         self.original_column_index = None
@@ -530,7 +509,7 @@ class PresolvepsilonOperationsSparse:
         if self.opts.sparsification:
             print("Sparsification operation")
             #self.sparsification_operation_sparse(epsilon = epsilon)
-            self.improve_sparsity(epsilon = epsilon)
+            self.improve_sparsity_new(epsilon = epsilon)
 
         return (self.A, self.b, self.c, self.lb, self.ub, self.of_sense, self.cons_senses, self.co, self.variable_names, self.constraint_names,
                 self.change_dictionary, self.operation_table)
@@ -575,11 +554,11 @@ class PresolvepsilonOperationsSparse:
         row_indices = np.repeat(np.arange(len(A_indptr) - 1), np.diff(A_indptr))
         adjusted_data = row_sums[row_indices] - max_activity_data
         delayed_sparsification = csr_matrix((adjusted_data, A_indices, A_indptr), shape=max_sparsification.shape)
-        # upper_bound_matrix = A_norm1.copy()  # Copy the structure of A_norm
-        # upper_bound_matrix.data[neg_mask] *= lb[A_norm.indices[neg_mask]]  # Multiply negative entries by lb
-        # upper_bound_matrix.data[pos_mask] *= ub[A_norm.indices[pos_mask]] # Multiply positive entries by ub. This two lines define a variable to be in its maximum value
+        upper_bound_matrix = A_norm1.copy()  # Copy the structure of A_norm
+        upper_bound_matrix.data[neg_mask] *= lb[A_norm.indices[neg_mask]]  # Multiply negative entries by lb
+        upper_bound_matrix.data[pos_mask] *= ub[A_norm.indices[pos_mask]] # Multiply positive entries by ub. This two lines define a variable to be in its maximum value
         #print(max_activity_variable.toarray())
-        upper_bound_matrix = A_norm1.multiply(ub)
+        #upper_bound_matrix = A_norm1.multiply(ub)
         upper_bound_matrix = upper_bound_matrix.tocsr()  # Ensure CSR format for consistent indexing
         max_activity_variable = delayed_sparsification
         equal_sign = np.sign(max_activity_variable.data) == np.sign(upper_bound_matrix.data)
@@ -608,6 +587,85 @@ class PresolvepsilonOperationsSparse:
         # print("Zero rows: ", len(zero_rows_sparse))
         self.A = A_norm
     
+    def improve_sparsity_new(self, epsilon=1e-6, delta=1e-6):
+        """
+        Perform a sparsification operation on the model's sparse matrix self.A.
+        Elements in the matrix that are deemed insignificant (based on epsilon)
+        will be set to zero, improving matrix sparsity.
+
+        Parameters:
+            epsilon (float): Threshold below which matrix elements are set to zero. Default is 1e-6.
+
+        Returns:
+            None: Updates self.A in-place as a sparse CSR matrix.
+        """
+        A_norm1, b_norm,  _ = normalize_features_sparse(self.A.copy(), self.b.copy())
+        num_rows, num_cols = A_norm1.shape
+        ub = np.array(self.ub)  # Upper bounds
+        lb = np.array(self.lb)  # Lower bounds
+        b_norm = np.array(b_norm)
+        A_norm = csr_matrix(self.A).copy()  # Sparse matrix in CSR format
+        #print("Non-zero elements in A_norm: ", A_norm.nonzero())
+
+        max_sparsification = A_norm1.copy()
+        data = max_sparsification.data
+        A_indices = max_sparsification.indices
+        A_indptr = max_sparsification.indptr
+
+        # Handle upper and lower bounds on non-zero elements
+        neg_mask = data < 0  # Mask for negative values
+        pos_mask = data > 0  # Mask for positive values
+
+        max_activity_data = np.zeros_like(data)
+        max_activity_data[neg_mask] = data[neg_mask] * ub[A_indices[neg_mask]]
+        max_activity_data[pos_mask] = data[pos_mask] * lb[A_indices[pos_mask]]
+
+        # Compute row sums
+        row_sums = np.add.reduceat(max_activity_data, A_indptr[:-1])
+
+        row_indices = np.repeat(np.arange(len(A_indptr) - 1), np.diff(A_indptr))
+        adjusted_data = row_sums[row_indices] - max_activity_data
+        delayed_sparsification = csr_matrix((adjusted_data, A_indices, A_indptr), shape=max_sparsification.shape)
+        upper_bound_matrix = A_norm1.copy()  # Copy the structure of A_norm
+        upper_bound_matrix.data[neg_mask] *= lb[A_norm.indices[neg_mask]]  # Multiply negative entries by lb
+        upper_bound_matrix.data[pos_mask] *= ub[A_norm.indices[pos_mask]] # Multiply positive entries by ub. This two lines define a variable to be in its maximum value
+        #print(max_activity_variable.toarray())
+        #upper_bound_matrix = A_norm1.multiply(ub)
+        upper_bound_matrix = upper_bound_matrix.tocsr()  # Ensure CSR format for consistent indexing
+        max_activity_variable = delayed_sparsification
+
+        # Compute the epsilon matrix
+        epsilon_matrix = np.where(
+            (np.isfinite(max_activity_variable.data)) & (max_activity_variable.data != 0), #& (upper_bound_matrix.data != 0) & (np.isfinite(upper_bound_matrix.data)),
+            np.abs(upper_bound_matrix.data/ max_activity_variable.data),
+            np.inf
+            )
+        
+        condition_epsilon = epsilon_matrix < epsilon  # Shape: (nnz,)
+  
+        original_rows, original_cols = A_norm.nonzero()  # Indices of all nonzero values in A_norm1
+        rows_epsilon = original_rows[condition_epsilon]  # Extract rows that meet the condition
+        cols_epsilon = original_cols[condition_epsilon]
+
+        vars_names_epsilon = [self.variable_names[col] for col in cols_epsilon]
+        rows_names_epsilon = [self.constraint_names[row] for row in rows_epsilon]   
+        unique_rows_epsilon = np.unique(rows_epsilon)
+        unique_cols_epsilon = np.unique(cols_epsilon)
+        print('Rows and cols with epsilon', len(unique_rows_epsilon), len(unique_cols_epsilon))
+        # for every row get the vars_epsilon that are in the row
+        vars_epsilon = defaultdict(list)
+        A_norm.data[condition_epsilon] = 0
+        self.A = A_norm  
+        # self.A.eliminate_zeros() 
+        # Efficiently populate vars_epsilon dictionary
+        for row, col in zip(rows_epsilon, cols_epsilon):  
+            vars_epsilon[row].append(col)  
+        vars_epsilon = dict(vars_epsilon)
+  
+        new_model = build_model(self.A, self.b, self.c, self.co, self.lb, self.ub, self.of_sense, self.cons_senses, self.variable_names, self.constraint_names)
+        model_flex = flexibility_constraints(new_model, self.constraint_names, vars_epsilon)
+        self.A, self.b, self.c, self.co, self.lb, self.ub, self.of_sense, self.cons_senses, self.variable_names, self.constraint_names = get_model_matrices(model_flex)
+
     def improve_sparsity(self, epsilon=1e-6, delta=1e-6):
         """
         Perform a sparsification operation on the model's sparse matrix self.A.
@@ -727,8 +785,8 @@ class PresolvepsilonOperationsSparse:
 
         for row, col in zip(*A_norm1.nonzero()):  # Avoid unpacking twice
             if col in valid_cols:  # Fast membership check
-                variables_rows[col].add(row)
-                rows_variables[row].add(col) 
+                variables_rows[col].add((row, self.constraint_names[row]))
+                rows_variables[row].add((col, self.variable_names[col]))
 
         # print("Both conditions hold for columns:", len(rows_variables))
 
@@ -738,11 +796,11 @@ class PresolvepsilonOperationsSparse:
         #         #print("Importance rows in col", col, ":", importance_dict[col])
         #         rows_to_delete.add(importance_dict[col].pop())
 
-
+        print(variables_rows)
         # print("Rows marked for deletion:", len(rows_to_delete)) 
-        self.cons_senses, new_vars = flexibility_constraints(self.A, self.b, self.cons_senses, rows_variables)
-        # # In A only delete the A epsilon corresponding to the self cons change
-        self.A = A_epsilon
+        self.cons_senses, new_vars = flexibility_constraints(self.A, self.b, self.cons_senses, self.constraint_names)
+        # # # In A only delete the A epsilon corresponding to the self cons change
+        # self.A = A_epsilon
         #self.A.eliminate_zeros()
         # rows_to_delete = list(map(int, rows_to_delete))
         # mask_rows_to_delete = np.ones(num_rows, dtype=bool)

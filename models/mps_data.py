@@ -306,15 +306,15 @@ def sections_mps_file(file):
 if __name__ == '__main__':
     # Modify the MPS file in the 'data' directory
     project_root = os.path.dirname(os.getcwd())
-    GAMS_path = os.path.join(project_root, 'data/real_data')
-    GAMS_path_modified = os.path.join(project_root, 'data/real_data_new')
+    GAMS_path = os.path.join(project_root, 'data/GAMS_library')
+    GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
     if not os.path.exists(GAMS_path_modified):
         os.makedirs(GAMS_path_modified)
     # file_path = os.path.join(GAMS_path, 'DINAM.mps')
     # output_path = os.path.join(GAMS_path_modified, 'DINAM.mps')
     # modify_mps_objective(file_path, output_path)
     for file in os.listdir(GAMS_path):
-        if file.endswith('openTEPES_EAPP_2030_sc01_st1.mps'):
+        #if file.endswith('openTEPES_EAPP_2030_sc01_st1.mps'):
             file_path = os.path.join(GAMS_path, file)
             print(os.path.exists(file_path))
             output_path = os.path.join(GAMS_path_modified, file)
