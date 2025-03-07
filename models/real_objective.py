@@ -3,8 +3,8 @@ import os
 import gurobipy as gp
 import numpy as np 
 
-from .utils_models.utils_functions import * 
-from .utils_models.standard_model import *
+from utils_models.utils_functions import * 
+from utils_models.standard_model import *
 
 
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -136,7 +136,7 @@ if __name__ == '__main__':
     c = np.array(c)
     b = np.array(b)
     non_zero_c = np.where((c != 1) & (c != 0))[0]   
-    print(len(non_zero_c))
+    print(non_zero_c[0:10])
     euclidean_norm(A,b,17472)
     # Get the objective function
     # obj = model_new.getObjective()

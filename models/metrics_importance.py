@@ -1,25 +1,17 @@
 import os
 import gurobipy as gp
-import json
-import sys
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.widgets import Slider
-import plotly.graph_objects as go
-import plotly.io as pio
+from scipy.stats import rankdata
+import scipy.sparse as sp   
 
-from description_open_TEPES import *
-from marginal_values_open_TEPES import *
+from description_data.description_open_TEPES import *
+from description_data.marginal_values_open_TEPES import *
+from description_data.plot_matrix import *
+from utils_models.utils_functions import *
+from utils_models.standard_model import *
+from example_models import *
 
-# PATH TO THE DATA
-parent_path = os.path.dirname(os.getcwd())
-root_interpretable_optimization = os.path.dirname(parent_path)
 
-# IMPORT FILES THAT ARE IN THE ROOT DIRECTORY
-sys.path.append(parent_path)
-from  models.utils_models.utils_functions import *
-from models.utils_models.standard_model import *
-from plot_matrix import *
 
 # PATH TO THE DATA
 real_data_path = os.path.join(parent_path, 'data/real_data')
@@ -181,20 +173,171 @@ def synergy_variables(model):
             synergy_variable_constraints[0, i] = -A_00 / A_first_row[i]
     print(synergy_variable_constraints)
 
-if __name__ == '__main__':
-    # Load the model
-    model = get_normalize_model(open_tepes_9n)
-    # imp_constr = importance_constraints_norm(model)
-    # name_imp = name_constraint_importance(imp_constr, model)
-    # #print(name_imp) 
-    # imp_var = importance_variable_of(model)
-    #imp_var_group = importance_variable_of_group(imp_var, model)
-    #print(imp_var_group)
-    imp_var_const = importance_variable_constraints(model)
-    var_constr, group_constr, group_var = importance_variable_constraints_group(imp_var_const, model)
-    #print(var_constr)
-    plot_group_matrix(group_var, group_constr, var_constr, 'importance_variable_constrs', 3, save_path_metrics_pre)
-    # imp_constr_var = importance_constraint_for_variable(model)
-    # asos_constr_var, group_constr, group_var = importance_constr_for_var_group(imp_constr_var, model)
-    # plot_group_matrix(group_var, group_constr, asos_constr_var, 'importance_constraints_for_variable', 3, save_path_metrics_pre)
+
+class RedundantConstraints:
+    def __init__ (self, model = None, opts =None):
+        self.model = model
+        self.opts = opts
+        self.A, self.b, self.c, self.co, self.lb, self.ub, self.of_sense, self.cons_senses, self.variable_names, self.constraint_names = get_model_matrices(self.model)
+        self.A_sparse = csr_matrix(self.A)
+        self.num_rows = self.A_sparse.shape[0]
+        self.num_cols = self.A_sparse.shape[1]
+
+        self.c = np.array(self.c)   
+
+        self.opts = opts
     
+    def orchestator_metrics_constraints(self, model, epsilon):
+        if self.opts.angles:
+            self.cosine_constraints(model)
+        elif self.opts.coefficientb_A:
+            self.coefficientb_A_constraints(model)
+        elif self.opts.coefficientc_A:
+            self.coefficientc_A_constraints(model)
+        elif self.opts.PRMAC:
+            self.PRMAC_constraints(model)
+    
+    def ranking_vector(self,metric, order ='descending'):
+        """
+        Rank the constraints according to the metric
+        """
+        if order == 'descending':
+            ranking = np.argsort(metric)[::-1]
+        else:
+            ranking = np.argsort(metric)
+        return ranking
+    
+    def ranking_matrix(self,metric, order ='descending'):
+        """
+        For each variable rank the constraints according to the metric
+        """
+        # find the duplicated values for each column
+        R = rankdata(metric, method = 'average')
+
+        return R
+    
+    def rankdata_sparse(self, matrix, decimal_places=8):
+        """
+        Applies rankdata on a sparse matrix column-wise without converting the whole matrix to dense.
+        
+        Parameters:
+        - matrix: scipy sparse matrix (CSR or CSC format; CSR is converted to CSC internally)
+        - decimal_places: Number of decimal places to round to (to handle precision issues)
+        
+        Returns:
+        - A sparse CSR matrix with ranked values for the nonzero entries.
+        
+        The function uses the CSC representation to quickly access nonzero entries of each column.
+        For each column, it:
+        1. Retrieves the nonzero row indices and values.
+        2. Rounds the nonzero values.
+        3. Computes their ranks (using, e.g., scipy.stats.rankdata).
+        4. Collects the row indices, column indices, and computed ranks.
+        Finally, it constructs a new CSR matrix from these arrays.
+        """
+
+        if not sp.issparse(matrix):
+            raise ValueError("Input must be a sparse matrix.")
+
+        # Convert to CSC format for efficient column-wise operations.
+        matrix = matrix.tocsc()
+        n_rows, n_cols = matrix.shape
+
+        # Lists to collect data for the ranked matrix.
+        row_indices_list = []
+        col_indices_list = []
+        data_list = []
+
+        # Iterate over each column using CSC structure.
+        for col in range(n_cols):
+            start = matrix.indptr[col]
+            end = matrix.indptr[col + 1]
+            if start < end:
+                # Get the row indices and nonzero values for this column.
+                col_rows = matrix.indices[start:end]
+                col_values = matrix.data[start:end]
+                
+                # Round the nonzero values to avoid precision issues.
+                rounded_values = np.round(col_values, decimals=decimal_places)
+                
+                # Compute ranks on the rounded nonzero values.
+                # Note: rankdata returns ranks in the order of the array.
+                col_ranks = rankdata(rounded_values)
+                
+                # Store the results.
+                row_indices_list.append(col_rows)
+                col_indices_list.append(np.full(col_ranks.shape, col, dtype=int))
+                data_list.append(col_ranks)
+
+        if row_indices_list:
+            # Concatenate the results from all columns.
+            all_rows = np.concatenate(row_indices_list)
+            all_cols = np.concatenate(col_indices_list)
+            all_data = np.concatenate(data_list)
+        else:
+            # No nonzero entries? Return an empty matrix of the same shape.
+            return csr_matrix(matrix.shape, dtype=float)
+
+        # Build the ranked matrix as a CSR matrix.
+        ranked_matrix = csr_matrix((all_data, (all_rows, all_cols)), shape=(n_rows, n_cols))
+        
+        return ranked_matrix
+# Convert back to efficient CSR format
+
+
+    def find_column_duplicates(self, matrix):
+        matrix = np.array(matrix, dtype=float)
+        matrix = np.round(matrix, 5)
+        for i, col in enumerate(matrix.T):  # Transpose to iterate over columns
+            unique_vals, counts = np.unique(col, return_counts=True)
+            duplicates = unique_vals[counts > 1]
+            print(f"Column {i+1}:")
+            print("  Repeated Values:", duplicates)
+            print("  Counts:", counts[counts > 1])
+
+
+    def cosine_constraints(self):
+        """
+        Compute the angles between the constraints
+        """
+        rows_norm = np.sqrt(self.A_sparse.multiply(self.A_sparse).sum(axis=1))
+        c_norm = np.linalg.norm(self.c)
+        c_vector = self.c.reshape(1,-1)
+        angles_metric = self.A_sparse.multiply(c_vector) / (rows_norm * c_norm)
+        constraint_angles = np.sum(angles_metric, axis = 1)
+        constraint_angles = constraint_angles.flatten()
+        ranking = self.find_column_duplicates(constraint_angles)
+        print(ranking)
+        return angles_metric
+    
+    def PRMAC_constraints(self):
+        """
+        Compute the PRMAC metric for the constraints. 
+        It is based on the paper: A class of algorithms for solving LP problems by prioritizing the constraints
+        """
+        # PRMAC_matrix = np.zeros((self.num_rows, self.num_cols))
+        # for i, row in enumerate(self.A_sparse):
+        self.c = np.array(self.c).flatten()
+        
+        # Copy the sparse matrix to avoid modifying the original.
+        PRMAC_matrix = self.A_sparse.copy()
+        
+        # For each nonzero element, subtract the corresponding objective value (using the column index)
+        # and take the absolute value.
+        # self.A_sparse.indices contains the column indices for each nonzero element.
+        PRMAC_matrix.data = np.abs(PRMAC_matrix.data - self.c[PRMAC_matrix.indices])
+        # Compute ranking on the resulting sparse matrix.
+        ranking = self.rankdata_sparse(PRMAC_matrix)
+        print(ranking)
+        
+        
+    
+    
+    #def utility_matrix(self):
+
+
+if __name__ == '__main__':
+    example1 = numerical_example()
+    model = gp.read(open_tepes_9n)
+    redundant_constraints = RedundantConstraints(example1)
+    redundant_constraints.PRMAC_constraints()

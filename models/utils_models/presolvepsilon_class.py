@@ -39,19 +39,19 @@ def flexibility_constraints(model, constraint_names, vars_remove):
 
         # Add excess variable with constraint-specific naming
         excess_var = model.addVar(
-            lb=0, ub=GRB.INFINITY, obj=0, vtype=GRB.CONTINUOUS, 
+            lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, 
             name=f"excess_{constraint_name}"
         )
         new_vars.append(excess_var)
         # Add slack variable with constraint-specific naming
         slack_var = model.addVar(
-            lb=0, ub=GRB.INFINITY, obj=0, vtype=GRB.CONTINUOUS, 
+            lb=0, ub=GRB.INFINITY, vtype=GRB.CONTINUOUS, 
             name=f"defect_{constraint_name}"
         )
         new_vars.append(slack_var)
 
     model.update()  # Ensure variables are added before modifying constraints
-    print(len(new_vars))
+    print('Number of new variables', len(new_vars))
     # Modify constraints to include excess and slack variables
     for constr in model.getConstrs():
         constr_name = constr.ConstrName  # Get the constraint name
@@ -61,12 +61,26 @@ def flexibility_constraints(model, constraint_names, vars_remove):
         # Add the new constraint
         if excess_var and slack_var:
             row_expr = model.getRow(constr)  # Get the existing constraint expression
-            
-            # Modify the constraint directly
+            rhs = constr.RHS  # Get the right-hand side value
+            # # Modify the constraint directly
             row_expr += excess_var - slack_var  # Adjust the expression
 
             model.chgCoeff(constr, excess_var, 1)  # Add excess variable coefficient
             model.chgCoeff(constr, slack_var, -1) # Add the new constraint
+           
+            model.update()
+    # add the new vars to the objective function with positive sign to the function we have
+# Get the current objective function
+    current_obj = model.getObjective()
+    # Calculate the maximum value of the coeffienct of c
+    coefficnet = model.getAttr('Obj')
+    c = np.array(coefficnet)
+    max_c = np.max(c)
+    print('Max c: ', max_c)
+    # Add the new variables with a positive sign to the existing objective
+    # Ensure new_vars is a list or iterable of Gurobi variables
+    M = 1e4
+    model.setObjective(current_obj+ M*gp.quicksum(var for var in new_vars), GRB.MINIMIZE)
 
     model.update()
     return model
@@ -191,7 +205,6 @@ class PresolvepsilonOperations:
         if self.opts.sparsification:
             print("Sparsification operation")
             self.sparsification_operation(epsilon = epsilon)
-            #self.improve_sparsity(epsilon = epsilon)
 
         if self.opts.dependency_rows:
             print("Linear dependency rows")
@@ -504,7 +517,7 @@ class PresolvepsilonOperationsSparse:
 
         if self.opts.operate_epsilon_cols:
             print("Eliminate zero columns operation")
-            self.eliminate_zero_columns_operation_sparse(epsilon = epsilon, norm_abs = self.opts.norm_abs)
+            self.eliminate_zero_columns_operation_sparse_improve(epsilon = epsilon, norm_abs = self.opts.norm_abs)
 
         if self.opts.sparsification:
             print("Sparsification operation")
@@ -627,10 +640,10 @@ class PresolvepsilonOperationsSparse:
         adjusted_data = row_sums[row_indices] - max_activity_data
         delayed_sparsification = csr_matrix((adjusted_data, A_indices, A_indptr), shape=max_sparsification.shape)
         upper_bound_matrix = A_norm1.copy()  # Copy the structure of A_norm
-        upper_bound_matrix.data[neg_mask] *= lb[A_norm.indices[neg_mask]]  # Multiply negative entries by lb
-        upper_bound_matrix.data[pos_mask] *= ub[A_norm.indices[pos_mask]] # Multiply positive entries by ub. This two lines define a variable to be in its maximum value
+        # upper_bound_matrix.data[neg_mask] *= lb[A_norm.indices[neg_mask]]  # Multiply negative entries by lb
+        # upper_bound_matrix.data[pos_mask] *= ub[A_norm.indices[pos_mask]] # Multiply positive entries by ub. This two lines define a variable to be in its maximum value
         #print(max_activity_variable.toarray())
-        #upper_bound_matrix = A_norm1.multiply(ub)
+        upper_bound_matrix = A_norm1.multiply(ub)
         upper_bound_matrix = upper_bound_matrix.tocsr()  # Ensure CSR format for consistent indexing
         max_activity_variable = delayed_sparsification
 
@@ -881,17 +894,20 @@ class PresolvepsilonOperationsSparse:
         - norm_abs: Norm type to use for calculation ('euclidean' or 'abs').
         """
         # Normalize features (A_norm is sparse)
-        #A_norm, c_norm, _ = normalize_features_sparse(self.A.T.copy(), self.c.copy())
-        A_norm = self.A.copy()
+        A = self.A.copy()
+        A_norm, b, _ = normalize_features_sparse(A.T, self.c.copy())    
+        
+        #A_norm = self.A.copy()
         c_norm = self.c.copy()
         self.c = np.array(c_norm)
         num_rows, num_cols = self.A.shape
         print("Number of columns: ", num_cols)
         # Compute norms based on the specified method
         if norm_abs == 'euclidean':
+            print("Euclidean norm") 
             col_sums_of_squares = A_norm.power(2).sum(axis=0)
             column_norms = np.sqrt(np.asarray(col_sums_of_squares).ravel())
-            print(len(np.where(column_norms < 1)[0]))
+            print(len(np.where(column_norms < 0.0015)[0]))
         elif norm_abs == 'abs':
             column_norms = abs(A_norm).max(axis=0).toarray().flatten()
             print(len(np.where(column_norms < 1)[0]))
@@ -901,26 +917,11 @@ class PresolvepsilonOperationsSparse:
         # Compute ratio of column norm to the absolute value of c_norm
         with np.errstate(divide='ignore', invalid='ignore'):
             ratio_columns = np.where(np.abs(c_norm) != 0, column_norms /np.abs(c_norm), column_norms)
-
-        print("Ratio columns: ", len(np.where(ratio_columns < epsilon)[0]))
+        print(epsilon)
+        print("Ratio columns: ", len(np.where(column_norms < epsilon)[0]))
         # Identify columns to delete
-        columns_to_delete = np.where(ratio_columns < epsilon)[0]
+        columns_to_delete = np.where(column_norms < epsilon)[0]
         # Adjust constraint senses based on eliminated columns
-        for row_index in range(num_rows):
-            # Extract this row as a sparse vector
-            row = self.A.getrow(row_index)
-            sub_indices = np.in1d(row.indices, columns_to_delete)  # indices within the row that correspond to columns_to_delete
-            sub_data = row.data[sub_indices]
-
-            if len(sub_data) == 0:
-                continue
-            if np.all(sub_data > 0):
-                self.cons_senses[row_index] = '<='
-            elif np.all(sub_data < 0):
-                self.cons_senses[row_index] = '>='
-            else:
-                pass
-
         mask_cols = np.ones(num_cols, dtype=bool)
         mask_cols[columns_to_delete] = False
 
@@ -939,3 +940,83 @@ class PresolvepsilonOperationsSparse:
 
         # Record the columns that were zeroed out
         self.change_dictionary["Eliminate Zero Columns"] = {"Columns": columns_to_delete.tolist()}
+    
+    def eliminate_zero_columns_operation_sparse_improve(self, epsilon, norm_abs='euclidean'):
+        """
+        Eliminate columns in the matrix where the normalized column norm relative to the objective coefficients
+        is below a given epsilon threshold (sparse implementation).
+
+        Parameters:
+        - epsilon: Threshold for determining which columns to eliminate.
+        - norm_abs: Norm type to use for calculation ('euclidean' or 'abs').
+        """
+        # Normalize features (A_norm is sparse)
+        # A = self.A.copy()
+        # print(A.shape)
+        # A_norm, c, _ = normalize_features_sparse(A.T, self.c.copy())    
+        # A_norm = A_norm.T
+        # #A_norm = self.A.copy()
+        # c_norm =c
+        # self.c = np.array(c_norm)
+        A_norm = self.A.copy()
+        c_norm = self.c.copy()
+        num_rows, num_cols = self.A.shape
+        print("Number of columns: ", num_cols)
+        print('Number of non-zero elements in A:', A_norm.nnz)  
+        # Compute norms based on the specified method
+        if norm_abs == 'euclidean':
+            print("Euclidean norm") 
+            col_sums_of_squares = A_norm.power(2).sum(axis=0)
+            column_norms = np.sqrt(np.asarray(col_sums_of_squares).ravel())
+            print(len(np.where(column_norms < 0.0015)[0]))
+        elif norm_abs == 'abs':
+            column_norms = abs(A_norm).max(axis=0).toarray().flatten()
+            print(len(np.where(column_norms < 1)[0]))
+        else:
+            raise ValueError("Invalid norm_abs value. Use 'euclidean' or 'abs'.")
+
+        # Compute ratio of column norm to the absolute value of c_norm
+        with np.errstate(divide='ignore', invalid='ignore'):
+            ratio_columns = np.where(np.array(c_norm) > 0, column_norms /c_norm, column_norms)
+        print("Ratio columns: ", len(np.where(ratio_columns < epsilon)[0]))
+        # Identify columns to delete
+        condition_epsilon = ratio_columns < epsilon
+        cols_to_delete = np.where(condition_epsilon)[0]
+        vars_names_epsilon = [self.variable_names[col] for col in cols_to_delete]
+        #print(vars_names_epsilon)
+        affected_rows = np.unique(A_norm[:, cols_to_delete].nonzero()[0])  # Get unique row indices
+
+        print(f"Affected rows: {len(affected_rows)} / {num_rows}")
+        row_indices, col_indices = A_norm[:, cols_to_delete].nonzero()
+        row_col_mapping = {row: [] for row in affected_rows}
+        for row, col in zip(row_indices, col_indices):
+            actual_col = cols_to_delete[col]  # Map back to original column indices
+            row_col_mapping[row].append(actual_col)
+
+        # For the cols that are going to be deleted, get the rows that are going to be modified
+
+        # Print information about zero columns
+        zero_columns_after = np.where(self.A.getnnz(axis=0) == 0)[0]
+        print("Zero columns after:", len(zero_columns_after))
+        new_model = build_model(self.A, self.b, self.c, self.co, self.lb, self.ub, self.of_sense, self.cons_senses, self.variable_names, self.constraint_names)
+        model_flex = flexibility_constraints(new_model, self.constraint_names, row_col_mapping)
+        self.A, self.b, self.c, self.co, self.lb, self.ub, self.of_sense, self.cons_senses, self.variable_names, self.constraint_names = get_model_matrices(model_flex)
+        # # Adjust constraint senses based on eliminated columns
+        new_num_rows, new_num_cols = self.A.shape   
+        mask_cols = np.ones(new_num_cols, dtype=bool)
+        mask_cols[cols_to_delete] = False
+
+        # Create a sparse diagonal mask for columns
+        mask_diag_cols = spdiags(mask_cols.astype(int), 0, new_num_cols, new_num_cols)
+
+        # Multiply from the right to zero out selected columns
+        self.A = self.A.dot(mask_diag_cols)
+
+        # Update self.c if needed (e.g., zero out the objective coefficients for eliminated columns)
+        self.c = np.array(self.c)
+        #self.c[cols_to_delete] = 0
+        self.A.eliminate_zeros()
+
+
+        # # Record the columns that were zeroed out
+        # self.change_dictionary["Eliminate Zero Columns"] = {"Columns": cols_to_delete.tolist()}

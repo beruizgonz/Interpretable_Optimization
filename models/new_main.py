@@ -12,7 +12,7 @@ from opts import parse_opts
 from utils_models.presolvepsilon_class import PresolvepsilonOperations, PresolvepsilonOperationsSparse
 from utils_models.utils_functions import *
 from utils_models.standard_model import standard_form_e1, standard_form_e2, construct_dual_model_sparse
-# from real_objective import set_real_objective
+from real_objective import set_real_objective
  
 logging.basicConfig()
 log = logging.getLogger(__name__)
@@ -29,14 +29,14 @@ real_data_path = os.path.join(project_root, 'data/real_data')
 bounds_path = os.path.join(project_root, 'data/bounds_trace')
 
 GAMS_path_modified = os.path.join(project_root, 'data/GAMS_library_modified')
-model_path_modified = os.path.join(GAMS_path_modified, 'TABORA.mps')
+model_path_modified = os.path.join(GAMS_path_modified, 'EGYPT.mps')
 real_model_path = os.path.join(real_data_path,  'openTEPES_EAPP_2030_sc01_st1.mps')
 
 # PATH TO SAVE THE RESULTS
-results_folder = os.path.join(project_root, 'results_new/global/sparse/real_problems')
-sparsification_results = os.path.join(results_folder, 'sparsification_improve')
+results_folder = os.path.join(project_root, 'results_new/global/sparse/gams_library')
+sparsification_results = os.path.join(results_folder, 'prueba')
 zeroepsilon_row_results = os.path.join(results_folder, 'epsilon_rows_norm')
-zeroepsilon_col_results = os.path.join(results_folder, 'epsilon_cols_norm')
+zeroepsilon_col_results = os.path.join(results_folder, 'epsilon_cols_norm_flexibility')
 dependency_rows_results = os.path.join(results_folder, 'epsilon_dependency_rows')
 dependency_cols_results = os.path.join(results_folder, 'epsilon_dependency_cols')
 prueba = os.path.join(results_folder, 'prueba')
@@ -126,6 +126,8 @@ def sensitivity_analysis(model, presolve, dual=False, min_threshold=0.0015, max_
         start_time = datetime.now()
 
         iterative_model.setParam('OutputFlag', 0)
+        #disable dual reduction
+        iterative_model.setParam('DualReductions', 0)
         iterative_model.optimize()
 
         execution_time.append(datetime.now() - start_time)
@@ -144,6 +146,8 @@ def sensitivity_analysis(model, presolve, dual=False, min_threshold=0.0015, max_
             results['constraint_violation'].append(abs_vio)
             results['of_original_decision'].append(iterative_model.objVal)
         else:
+            
+            print(iterative_model.status)
             print("Model is infeasible or unbounded.")
             results['epsilon'].append(threshold)
             results['objective_function'].append(np.nan)
@@ -185,6 +189,7 @@ def sensitivity_analysis_file(file, save_path, opts):
 
     # Convert the model to standard form
     original_primal = standard_form_e2(model)
+    #original_primal = set_real_objective(original_primal)
     if opts.local_solution:
         lb, ub = set_new_bounds(original_primal, alpha_min=0.0001, alpha_max=1000)
         A_sparse, b_sparse, c, co, _, _, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(original_primal)
@@ -241,7 +246,7 @@ def sensitivity_analysis_file(file, save_path, opts):
     elif opts.dependency_cols:
         operation = 'dependency_cols'
 
-    model_save_path = os.path.join(save_path, f'epsilon_{operation}_{model_name}_improve.json')
+    model_save_path = os.path.join(save_path, f'epsilon_{operation}_{model_name}_flexibility_more_ep.json')
     dict2json(results, model_save_path)
 
     return results
@@ -268,44 +273,44 @@ if __name__ == '__main__':
     #     if name.endswith('.lp') or name.endswith('.7z') or name == 'openTEPES_NT2040_2040_CY2009_st0.mps':
     #         continue
     #     model_path = os.path.join(GAMS_path_modified, f'{name}')
-    #     print(model_path)
-    # #     opts.operate_epsilon_rows = True
-    # #     opts.operate_epsilon_cols = False
-    # #     opts.sparsification = False
-    # #     sensitivity_analysis_file(model_path,save_path = zeroepsilon_row_results, opts = opts)
+    # #     print(model_path)
+    # # # # #     opts.operate_epsilon_rows = True
+    # # # # #     opts.operate_epsilon_cols = False
+    # # # # #     opts.sparsification = False
+    # # # # #     sensitivity_analysis_file(model_path,save_path = zeroepsilon_row_results, opts = opts)
     # #     print('CHANGE TO COLUMNS')
     # #     opts.operate_epsilon_cols = True
     # #     opts.operate_epsilon_rows = False
     # #     opts.sparsification = False
     # #     sensitivity_analysis_file(model_path,save_path = zeroepsilon_col_results, opts = opts)
-    # #     print('CHANGE TO SPARSIFICATION')
-    # #     opts.operate_epsilon_cols = False
-    # #     opts.operate_epsilon_rows = False
-    # #     opts.sparsification = True
-    # #     sensitivity_analysis_file(model_path, save_path = sparsification_results, opts = opts)
+    #     print('CHANGE TO SPARSIFICATION')
+    #     opts.operate_epsilon_cols = False
+    #     opts.operate_epsilon_rows = False
+    #     opts.sparsification = True
+    #     sensitivity_analysis_file(model_path, save_path = sparsification_results, opts = opts)
     #     print('CHANGE TO DEPENDENCY ROWS')
     #     opts.operate_epsilon_cols = False
     #     opts.operate_epsilon_rows = False
     #     opts.sparsification = False
     #     opts.dependency_rows = True
     #     sensitivity_analysis_file(model_path, save_path = dependency_rows_results, opts = opts)
-        # print('CHANGE TO DEPENDENCY COLUMNS')
-        # opts.operate_epsilon_cols = False
-        # opts.operate_epsilon_rows = False
-        # opts.sparsification = False
-        # opts.dependency_rows = False
-        # opts.dependency_cols = True
-        # sensitivity_analysis_file(model_path, save_path = dependency_cols_results, opts = opts)
-    # Real problem path    
-    #model = gp.read(real_model_path)
-    # opts.operate_epsilon_rows = True
-    # opts.operate_epsilon_cols = False
-    # sensitivity_analysis_file(model_path_modified, save_path = prueba, opts = opts)
+    #     print('CHANGE TO DEPENDENCY COLUMNS')
+    #     opts.operate_epsilon_cols = False
+    #     opts.operate_epsilon_rows = False
+    #     opts.sparsification = False
+    #     opts.dependency_rows = False
+    #     opts.dependency_cols = True
+    #     sensitivity_analysis_file(model_path, save_path = dependency_cols_results, opts = opts)
+    # #Real problem path    
+    #model = gp.read(model_path_modified)
+    # opts.operate_epsilon_rows = False
+    # opts.operate_epsilon_cols = True
+    # sensitivity_analysis_file(model_path_modified, save_path = zeroepsilon_col_results, opts = opts)
     print('CHANGE TO SPARSIFICATION')
-    opts.operate_epsilon_cols = False
+    opts.operate_epsilon_cols = True
     opts.operate_epsilon_rows = False   
-    opts.sparsification = True
-    sensitivity_analysis_file(real_model_path, save_path = sparsification_results, opts = opts)
+    opts.sparsification = False
+    sensitivity_analysis_file(model_path_modified, save_path = sparsification_results, opts = opts)
     # print('CHANGE TO SPARSIFICATION')
     # opts.operate_epsilon_cols = False
     # opts.operate_epsilon_rows = False

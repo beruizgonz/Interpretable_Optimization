@@ -181,6 +181,35 @@ def plot_changes_histogram_interactive(EPSILON_NUMBER, model, group_variables, g
     plot_histogram(count_by_group_var, total_variances, 'Changes in Variables by Group')
     plot_histogram(count_by_group_constraints, total_constraints, 'Changes in Constraints by Group')
 
+def plot_histogram(groups, entity_type, title, save_path):
+    """
+    Plot a histogram showing the number of entities per group.
+    Parameters:
+    - groups: Dictionary with the number of entities per group.
+    - entity_type: Type of entity (e.g., variables, constraints).
+    """
+
+    # Extract group names and counts
+    group_names = list(groups.keys())
+    counts = list(len(group) for group in groups.values())  
+    # Sort groups by names
+    group_names, counts = zip(*sorted(zip(group_names, counts), key=lambda x: x[0]))
+    # Create the bar plot
+    fig, ax = plt.subplots(figsize=(10, 6))
+    x = np.arange(len(group_names))
+    ax.bar(x, counts, color="skyblue", alpha=0.7)
+
+    # Set axis labels and title
+    ax.set_xlabel("Groups")
+    ax.set_ylabel("Number of elements")
+    ax.set_title(title)
+    ax.set_xticks(x)
+    ax.set_xticklabels(group_names, rotation=45, ha="right")
+    plt.tight_layout()
+    if save_path is not None:
+        total_path = f'{save_path}/{title}.png'   
+        plt.savefig(total_path)
+    plt.show()
 
 def plot_changes_histogram(dict_change_groups, dict_group, title, epsilon_number):
     """
@@ -268,6 +297,7 @@ def plot_group_matrix(variable_groups, constraint_groups, associations, title_gr
     plt.xlabel('Variables Groups', fontsize=14)  # Increased font size
     plt.ylabel('Constraints Groups', fontsize=14)  # Increased font size
     plt.tight_layout()
-    total_path = f'{save_path}/{title_graph}.png'   
-    plt.savefig(total_path)
+    if save_path is not None:
+        total_path = f'{save_path}/{title_graph}.png'   
+        plt.savefig(total_path)
     plt.show()

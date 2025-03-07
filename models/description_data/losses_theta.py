@@ -141,9 +141,15 @@ def flexibility_model(model, vars_remove):
     new_vars = []
     A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model)
     # View the rows that are affected by the variables to remove
-    affected_rows = np.unique(np.where(A[:, vars_remove].toarray() != 0)[0])
-    print(affected_rows[0:10])
-    for row in vars_remove:
+         
+
+    # Extract row indices where any of the specified columns have nonzero values
+    row_indices, col_indices = A.nonzero()  # Get all nonzero (row, col) pairs
+    affected_rows = np.unique(row_indices[np.isin(col_indices, vars_remove)])
+
+    print('Affected_rows:', len(affected_rows))
+
+    for row in affected_rows:
         constraint_name = constraint_names[row]  # Get the constraint name
 
         # Add excess variable with constraint-specific naming
@@ -160,6 +166,17 @@ def flexibility_model(model, vars_remove):
         new_vars.append(slack_var)
 
     model.update()  # Ensure variables are added before modifying constraints
+    # Remove the variables from the model of vars_remove
+# # Retrieve all variables once (avoiding repeated list indexing)
+    all_vars = model.getVars()
+
+    # Convert vars_remove to a set for faster lookups
+    vars_to_remove = [all_vars[i] for i in vars_remove]  # Set comprehension is faster
+
+    # Remove variables in bulk
+    model.remove(vars_to_remove)
+    model.update()
+    count = 0 
     # Modify constraints to include excess and slack variables
     for constr in model.getConstrs():
         constr_name = constr.ConstrName  # Get the constraint name
@@ -168,6 +185,7 @@ def flexibility_model(model, vars_remove):
         slack_var = model.getVarByName(f"defect_{constr_name}")
         # Add the new constraint
         if excess_var and slack_var:
+            count += 1
             row_expr = model.getRow(constr)  # Get the existing constraint expression
             
             # Modify the constraint directly
@@ -175,42 +193,77 @@ def flexibility_model(model, vars_remove):
 
             model.chgCoeff(constr, excess_var, 1)  # Add excess variable coefficient
             model.chgCoeff(constr, slack_var, -1) # Add the new constraint
-
+    print('Number of constraints modified:', count)
     model.update()
+    # current_obj = model.getObjective()
+
+    # # Add the new variables with a positive sign to the existing objective
+    # model.setObjective(current_obj + gp.quicksum(new_vars), GRB.MINIMIZE)
+    # model.update()
     return model, vars_remove
 
 
 
 def remove_variables(model, interest_vars):
+    # Extract relevant model data
     names_var, asos_var, group_var, invert_var = groups_by_variables(model)
     A, b, c, co, lb, ub, of_sense, cons_senses, variable_names, constraint_names = get_model_matrices(model)
-    for i in interest_vars:
-        interest_var = i
-        # Get the position that start with the interest_var
-        variable_map_index = {var: i for i, var in enumerate(variable_names)}
-        interest_var_index = [variable_map_index[var] for var in variable_names if var.startswith(interest_var)]
-        # Remove the variables from the model
-        variables_rem = group_var[interest_var]
-        #model.remove([model.getVarByName(var) for var in variables_rem])
-        #model.update()
-        # if i != 'vLineLosses':
-        #     model_new, var_rem = flexibility_model(model, variables_rem)
-        # else:
-        #     model_new = model.copy()
-        #     model_new.remove([model_new.getVarByName(var) for var in variables_rem])
-        #     model_new.update()
-        model_new = model.copy()
-        model_new, vars = flexibility_model(model_new, variables_rem)
-        model_new.setParam('OutputFlag', 0) 
-        model_new.optimize()   
-        A_new, _, _, _, _, _, _, _, _, _ = get_model_matrices(model_new)
-        print(A_new.shape) 
-        print(model_new.objVal)
-        model = model_new.copy()
-    return model
+
+    # Create a mapping of variable names to their indices
+    variable_map_index = {var: i for i, var in enumerate(variable_names)}
+
+    # Find all indices of variables that match ANY of the patterns in `interest_vars`
+    interest_var_index = [
+        i for var, i in variable_map_index.items()
+        if any(var.startswith(interest) for interest in interest_vars)  # Corrected check
+    ]
+
+    # Get variable names that need to be removed
+    variables_rem = [variable_names[i] for i in interest_var_index]
+    print(f"Total variables to remove: {len(variables_rem)}")
+
+    # Get upper bounds of variables to be removed
+    ub_vars = [ub[i] for i in interest_var_index]
+    print(f"Upper bounds of first 10 removed vars: {ub_vars[:10]}")
+
+    # Convert variable names to their corresponding indices
+    var_remove = [variable_map_index[var] for var in variables_rem if var in variable_map_index]
+    print(f"Number of variables to remove: {len(var_remove)}")
+
+    # Create a copy of the model for modifications
+    model_new = model.copy()
+    print(f"Original constraint matrix shape: {A.shape}")
+
+    # Call flexibility model function to modify constraints
+    model_new, vars = flexibility_model(model_new, var_remove)
+
+    # Suppress Gurobi output
+    model_new.setParam('OutputFlag', 0)
+    model_new.optimize()   
+
+    # Get new constraint matrix
+    A_new, _, _, _, _, _, _, _, _, _ = get_model_matrices(model_new)
+    print(f"New constraint matrix shape: {A_new.shape}") 
+    print(f"Objective Value after modification: {model_new.objVal}")
+
+    # Return the updated model
+    return model_new.copy()
+
 
 
 if __name__ == '__main__':
     model_open = gp.read(open_tepes_9n)
     model_open_s = standard_form_e2(model_open)
-    remove_variables(model_open_s, ['vLineLosses','vTheta'])
+    A_sparse, b_sparse, c, co, lb, ub, of_sense, cons_senses, var_names = calculate_bounds_candidates_sparse(model_open_s, None, 'model_name')
+    # Build model with bounds
+    model_bounds = build_model(A_sparse, b_sparse, c, co, lb, ub, of_sense, cons_senses, var_names)
+    model_bounds.setParam('OutputFlag', 0)
+    model_bounds.optimize()
+    print(model_bounds.objVal)
+    model = remove_variables(model_bounds, ['vLineLosses','vTheta'])
+    # names_var, asos_var, group_var, invert_var = groups_by_variables(model)
+    # names_constr, asos_constr, group_constr, invert_constr = groups_by_constraints(model)
+    # print(group_constr.keys())
+    # postoname = map_position_to_names(model)
+    # asos = create_association_dict(group_var, group_constr, invert_var, invert_constr, postoname)
+    # plot_group_matrix(group_var, group_constr, asos, 'Losses_openTEPES_EAPP_2030_sc01_st1', 3, real_problems)

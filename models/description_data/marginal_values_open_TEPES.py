@@ -14,8 +14,8 @@ root_interpretable_optimization = os.path.dirname(parent_path)
 sys.path.append(parent_path)
 from  models.utils_models.utils_functions import *
 from models.utils_models.standard_model import *
-from plot_matrix import *
-from description_open_TEPES import *
+from .plot_matrix import *
+from .description_open_TEPES import *
 from models.real_objective import *
 
 
